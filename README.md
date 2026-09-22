@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⚡ PROJECT KONTROLL
+#  PROJECT KONTROLL
 
 ### *Jarvis-Grade AR Gesture Mouse & Ambient Windows 11 OS Controller*
 
