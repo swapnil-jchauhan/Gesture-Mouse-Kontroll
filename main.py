@@ -7,6 +7,7 @@ import sys
 import os
 import argparse
 import time
+import math
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -60,7 +61,6 @@ class KontrollApp:
         )
 
         # 7. 120 Hz Motion Extrapolator & High-Rate Loop (8ms = ~125 Hz)
-        # Even with a 15-30 FPS camera, this extrapolates and smooths motion at 120 FPS
         self.last_frame_timestamp = 0.0
         self.current_cursor_x = float(self.mouse.screen_width // 2)
         self.current_cursor_y = float(self.mouse.screen_height // 2)
@@ -74,11 +74,11 @@ class KontrollApp:
         self.loop_timer.timeout.connect(self._process_frame_tick)
         self.loop_timer.start(8)  # 120 Hz
 
-        # Initial Boot Greeting HUD
+        # Initial Jarvis Boot Sequence HUD
         if is_autostart_launch:
-            QTimer.singleShot(1500, lambda: self.hud.trigger_popup(True))
+            QTimer.singleShot(1000, lambda: self.hud.trigger_boot_sequence())
         else:
-            QTimer.singleShot(400, lambda: self.hud.trigger_popup(True))
+            QTimer.singleShot(350, lambda: self.hud.trigger_boot_sequence())
 
     def _set_mount_mode(self, mode: str):
         self.gestures.mount_mode = mode
@@ -99,9 +99,9 @@ class KontrollApp:
         self.debug_window.activateWindow()
 
     def _process_frame_tick(self):
-        """120 Hz High-Rate Tick: processes new camera frames or extrapolates smoothly."""
+        """120 Hz High-Rate Tick: processes new camera frames or extrapolates smoothly at 120 FPS."""
         now = time.perf_counter()
-        dt = max(1e-4, min(0.05, now - self.last_tick_time))
+        dt = max(1e-4, min(0.04, now - self.last_tick_time))
         self.last_tick_time = now
 
         landmarks, _, timestamp, has_hand, _ = self.tracker.get_latest_data()
@@ -110,34 +110,54 @@ class KontrollApp:
             if self.mouse.is_dragging:
                 self.mouse.left_up()
             self.gestures.reset_hand_state()
+            self.vel_x = 0.0
+            self.vel_y = 0.0
             return
 
-        # Process new camera frame
+        # New Camera Frame Arrived
         if timestamp > self.last_frame_timestamp:
+            frame_dt = max(1e-4, timestamp - self.last_frame_timestamp)
             self.last_frame_timestamp = timestamp
 
-            # Process gestures (outputs adaptive 1€ filtered coordinates)
+            # Process gestures
             result = self.gestures.process(landmarks, timestamp=timestamp)
 
             if result.get("active"):
                 action = result.get("action", "MOVE")
-                target_x = int(result.get("cursor_x", self.target_cursor_x))
-                target_y = int(result.get("cursor_y", self.target_cursor_y))
-                self.target_cursor_x = float(target_x)
-                self.target_cursor_y = float(target_y)
+                target_x = float(result.get("cursor_x", self.target_cursor_x))
+                target_y = float(result.get("cursor_y", self.target_cursor_y))
+
+                # Velocity estimate for dead-reckoning extrapolation
+                self.vel_x = (target_x - self.current_cursor_x) / frame_dt
+                self.vel_y = (target_y - self.current_cursor_y) / frame_dt
+                self.current_cursor_x = target_x
+                self.current_cursor_y = target_y
 
                 # Direct zero-lag hardware dispatch
-                self.mouse.move_to(target_x, target_y)
+                self.mouse.move_to(int(round(target_x)), int(round(target_y)))
 
                 # Handle actions
                 if action == "CLICK":
                     self.mouse.click()
                 elif action == "DOUBLE_CLICK":
                     self.mouse.double_click()
+                elif action == "RIGHT_CLICK":
+                    self.mouse.right_click()
                 elif action == "DRAG_START":
                     self.mouse.left_down()
                 elif action == "DRAG_RELEASE":
                     self.mouse.left_up()
+        else:
+            # 120 Hz dead-reckoning extrapolation between frames (only when moving and not locked)
+            if self.gestures.is_active and not getattr(self.gestures, "last_is_locked", False):
+                speed = math.hypot(self.vel_x, self.vel_y)
+                if speed > 30.0:
+                    self.current_cursor_x += self.vel_x * dt
+                    self.current_cursor_y += self.vel_y * dt
+                    decay = 0.85
+                    self.vel_x *= decay
+                    self.vel_y *= decay
+                    self.mouse.move_to(int(round(self.current_cursor_x)), int(round(self.current_cursor_y)))
 
     def run(self):
         return self.app.exec()

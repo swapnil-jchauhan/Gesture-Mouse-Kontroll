@@ -177,12 +177,16 @@ class DebugWindow(QWidget):
         else:
             is_dragging = getattr(self.gesture_engine, "is_dragging", False)
             tap_state = getattr(self.gesture_engine, "tap_state", "UP")
+            right_state = getattr(self.gesture_engine, "right_click_state", "UP")
             if is_dragging:
-                self.action_label.setText("ACTION: PINCH DRAGGING ⇲")
+                self.action_label.setText("ACTION: DRAGGING (👌)")
                 self.action_label.setStyleSheet("color: #ffaa00; font-weight: bold; padding-left: 10px;")
             elif tap_state == "DOWN":
-                self.action_label.setText("ACTION: CONTACT ⚡")
+                self.action_label.setText("ACTION: LEFT CLICK CONTACT ⚡")
                 self.action_label.setStyleSheet("color: #00ffaa; font-weight: bold; padding-left: 10px;")
+            elif right_state == "DOWN":
+                self.action_label.setText("ACTION: RIGHT CLICK CONTACT ⚡")
+                self.action_label.setStyleSheet("color: #00e0ff; font-weight: bold; padding-left: 10px;")
             else:
                 self.action_label.setText("ACTION: MOVE")
                 self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
@@ -223,29 +227,33 @@ class DebugWindow(QWidget):
                 cv2.line(display_frame, points[p1], points[p2], (180, 120, 40), 1)
 
             for idx, pt in enumerate(points):
-                color = (0, 255, 255) if idx in (8, 12) else (100, 200, 255)
-                cv2.circle(display_frame, pt, 3 if idx not in (8, 12) else 6, color, -1)
+                color = (0, 255, 255) if idx in (4, 8, 12) else (100, 200, 255)
+                cv2.circle(display_frame, pt, 3 if idx not in (4, 8, 12) else 6, color, -1)
 
-            # Highlight Index & Middle tips
+            # Thumb (4), Index (8), Middle (12) tracking lines
+            p4 = points[4]
             p8 = points[8]
             p12 = points[12]
-            cv2.line(display_frame, p8, p12, (0, 255, 0), 2)
+            # Cyan line between Thumb and Index (Left Click / Drag)
+            cv2.line(display_frame, p4, p8, (255, 240, 0), 2)
+            # Green line between Index and Middle (Right Click)
+            cv2.line(display_frame, p8, p12, (0, 255, 0), 1)
 
-            # Compute Angle-Invariant Metric
+            # Compute Metric
             scale = self.gesture_engine._get_hand_scale(landmarks)
-            tap_ratio, _ = self.gesture_engine.compute_angle_invariant_tap_metric(landmarks, scale)
+            tap_ratio, _ = self.gesture_engine.compute_tap_metric(landmarks, scale)
 
             # Update tap progress bar
             pct = max(0, min(100, int((1.0 - (tap_ratio / 0.45)) * 100)))
             self.tap_bar.setValue(pct)
 
-            # Super gesture status
+            # Drag pose status
             is_super = self.gesture_engine.is_super_gesture(landmarks)
             if is_super:
-                self.super_label.setText("SUPER GESTURE: DETECTED! 👌")
+                self.super_label.setText("DRAG POSE: ACTIVE 👌")
                 self.super_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
             else:
-                self.super_label.setText("SUPER GESTURE: OFF")
+                self.super_label.setText("DRAG POSE: OFF")
                 self.super_label.setStyleSheet("color: #718096;")
 
         # Convert to QPixmap

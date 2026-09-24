@@ -1,16 +1,15 @@
 """
-Unit & Integration Test Suite for Project Kontroll (Angle-Invariant & Ergonomic Edition).
+Unit & Integration Test Suite for Project Kontroll (OS Aim Assist & New Gestures Edition).
 Verifies:
 1. 1€ filtering & kinetic deadband stillness jitter suppression
 2. Rapid velocity tracking response
-3. Instantaneous Single Click
-4. Rapid Double Click detection & coordinate lock
-5. Intentional Pinch-to-Drag & accidental drag elimination
-6. Angle-invariant local palm coordinate metrics (tilted webcam support)
-7. Pre-Tap Anchor Lock deflection prevention
-8. Magnetic Target Snapper & Breakout velocity
-9. Super Activation Gesture
-10. Hardware mouse simulator bounds & autostart registry
+3. Closed-Fist Index-Thumb Left Click & Rapid Double Click
+4. Index-Thumb with 3 Fingers UP for Drag & Drop
+5. Index-on-Middle Tap for Right Click
+6. Open-hand false-click immunity (must be closed fist for left click)
+7. OS-Level Sticky Aim Assist Cling & Breakout
+8. Hand exit immediate state reset
+9. Hardware mouse simulator bounds & autostart registry
 """
 
 import unittest
@@ -72,182 +71,183 @@ class TestOneEuroFilter(unittest.TestCase):
 
 
 class TestGestureEngine(unittest.TestCase):
-    def _create_mock_landmarks(self, index_tip_y=0.4, middle_tip_y=0.4, tap_close=False, pinch_drag=False, super_pose=False, middle_curled=False):
+    def _create_mock_landmarks(
+        self,
+        fist_closed=False,
+        fist_left_tap=False,
+        drag_super_pose=False,
+        right_click_tap=False,
+    ):
         lm = [SimpleNamespace(x=0.5, y=0.8, z=0.0) for _ in range(21)]
         # Wrist = 0
         lm[0] = SimpleNamespace(x=0.5, y=0.8, z=0.0)
         # Middle MCP = 9 (scale = 0.3)
         lm[9] = SimpleNamespace(x=0.5, y=0.5, z=0.0)
 
-        # Knuckles for palm frame
-        lm[5] = SimpleNamespace(x=0.42, y=0.52, z=0.0)  # Index MCP
-        lm[17] = SimpleNamespace(x=0.58, y=0.52, z=0.0) # Pinky MCP
+        # Knuckles
+        lm[5] = SimpleNamespace(x=0.42, y=0.52, z=0.0)   # Index MCP
+        lm[17] = SimpleNamespace(x=0.58, y=0.52, z=0.0)  # Pinky MCP
 
         # Thumb
-        lm[4] = SimpleNamespace(x=0.38, y=0.60, z=0.0)
+        lm[2] = SimpleNamespace(x=0.38, y=0.65, z=0.0)
+        lm[3] = SimpleNamespace(x=0.38, y=0.58, z=0.0)
+        lm[4] = SimpleNamespace(x=0.38, y=0.52, z=0.0)
 
         # Index tip (8), PIP (6)
-        lm[6] = SimpleNamespace(x=0.40, y=0.55, z=0.0)
-        lm[8] = SimpleNamespace(x=0.40, y=index_tip_y, z=0.0)
+        lm[6] = SimpleNamespace(x=0.40, y=0.45, z=0.0)
+        lm[8] = SimpleNamespace(x=0.40, y=0.35, z=0.0)   # extended index by default
 
         # Middle tip (12), PIP (10)
-        lm[10] = SimpleNamespace(x=0.50, y=0.52, z=0.0)
-        lm[12] = SimpleNamespace(x=0.50, y=middle_tip_y, z=0.0)
+        lm[10] = SimpleNamespace(x=0.50, y=0.45, z=0.0)
+        lm[12] = SimpleNamespace(x=0.50, y=0.35, z=0.0)  # extended middle by default
 
-        if middle_curled:
-            # Middle finger curled into palm (tip y > pip y)
-            lm[12] = SimpleNamespace(x=0.50, y=0.62, z=0.0)
+        # Ring (16, 14)
+        lm[14] = SimpleNamespace(x=0.54, y=0.47, z=0.0)
+        lm[16] = SimpleNamespace(x=0.54, y=0.37, z=0.0)
 
-        # Ring & Pinky
-        lm[14] = SimpleNamespace(x=0.54, y=0.54, z=0.0)
-        lm[16] = SimpleNamespace(x=0.54, y=0.58, z=0.0)
-        lm[18] = SimpleNamespace(x=0.58, y=0.56, z=0.0)
-        lm[20] = SimpleNamespace(x=0.58, y=0.60, z=0.0)
+        # Pinky (20, 18)
+        lm[18] = SimpleNamespace(x=0.58, y=0.49, z=0.0)
+        lm[20] = SimpleNamespace(x=0.58, y=0.39, z=0.0)
 
-        if tap_close:
-            # Index tip touching middle tip
-            target_y = lm[12].y
-            lm[8] = SimpleNamespace(x=0.495, y=target_y, z=0.0)
+        if fist_closed:
+            # Middle, Ring, Pinky curled into palm (tips y >= pip y)
+            lm[12] = SimpleNamespace(x=0.50, y=0.58, z=0.0)
+            lm[16] = SimpleNamespace(x=0.54, y=0.60, z=0.0)
+            lm[20] = SimpleNamespace(x=0.58, y=0.62, z=0.0)
 
-        if pinch_drag:
-            # Thumb tip (4) and Index tip (8) touching
-            lm[4] = SimpleNamespace(x=0.44, y=0.50, z=0.0)
-            lm[8] = SimpleNamespace(x=0.44, y=0.50, z=0.0)
+        if fist_left_tap:
+            # Fist closed + Index tip touches Thumb tip
+            lm[12] = SimpleNamespace(x=0.50, y=0.58, z=0.0)
+            lm[16] = SimpleNamespace(x=0.54, y=0.60, z=0.0)
+            lm[20] = SimpleNamespace(x=0.58, y=0.62, z=0.0)
+            lm[4] = SimpleNamespace(x=0.42, y=0.50, z=0.0)
+            lm[8] = SimpleNamespace(x=0.425, y=0.50, z=0.0)
 
-        if super_pose:
-            # Thumb (4) and Index (8) form ring
-            lm[4] = SimpleNamespace(x=0.44, y=0.55, z=0.0)
-            lm[8] = SimpleNamespace(x=0.45, y=0.55, z=0.0)
-            # Middle (12), Ring (16), Pinky (20) extended upright (y tip < y pip)
-            lm[10] = SimpleNamespace(x=0.50, y=0.50, z=0.0)
-            lm[12] = SimpleNamespace(x=0.50, y=0.30, z=0.0)
+        if drag_super_pose:
+            # Thumb + Index touch, while Middle, Ring, Pinky are straight UP
+            lm[4] = SimpleNamespace(x=0.42, y=0.50, z=0.0)
+            lm[8] = SimpleNamespace(x=0.425, y=0.50, z=0.0)
+            lm[12] = SimpleNamespace(x=0.50, y=0.28, z=0.0)
+            lm[16] = SimpleNamespace(x=0.54, y=0.30, z=0.0)
+            lm[20] = SimpleNamespace(x=0.58, y=0.32, z=0.0)
 
-            lm[14] = SimpleNamespace(x=0.54, y=0.52, z=0.0)
-            lm[16] = SimpleNamespace(x=0.54, y=0.32, z=0.0)
-
-            lm[18] = SimpleNamespace(x=0.58, y=0.55, z=0.0)
-            lm[20] = SimpleNamespace(x=0.58, y=0.35, z=0.0)
+        if right_click_tap:
+            # Index tip touches Middle tip, both extended
+            lm[8] = SimpleNamespace(x=0.495, y=0.35, z=0.0)
+            lm[12] = SimpleNamespace(x=0.50, y=0.35, z=0.0)
 
         return lm
 
-    def test_single_click_detection(self):
+    def test_closed_fist_left_click(self):
+        """Verifies closed-fist index-on-thumb tap triggers left click on release."""
         engine = GestureEngine(screen_width=1920, screen_height=1080)
-        lm_open = self._create_mock_landmarks(tap_close=False)
-        res1 = engine.process(lm_open, timestamp=1.0)
+        lm_fist = self._create_mock_landmarks(fist_closed=True)
+        res1 = engine.process(lm_fist, timestamp=1.0)
         self.assertEqual(res1["action"], "MOVE")
 
-        lm_tap = self._create_mock_landmarks(tap_close=True)
+        lm_tap = self._create_mock_landmarks(fist_left_tap=True)
         res2 = engine.process(lm_tap, timestamp=1.05)
         self.assertEqual(res2["action"], "TAP_CONTACT")
 
-        res3 = engine.process(lm_open, timestamp=1.20)
+        res3 = engine.process(lm_fist, timestamp=1.18)
         self.assertEqual(res3["action"], "CLICK")
 
-    def test_double_click_detection(self):
+    def test_closed_fist_double_click(self):
+        """Verifies rapid second tap triggers double click."""
         engine = GestureEngine(screen_width=1920, screen_height=1080)
-        lm_open = self._create_mock_landmarks(tap_close=False)
-        lm_tap = self._create_mock_landmarks(tap_close=True)
+        lm_fist = self._create_mock_landmarks(fist_closed=True)
+        lm_tap = self._create_mock_landmarks(fist_left_tap=True)
 
-        engine.process(lm_open, timestamp=1.0)
+        engine.process(lm_fist, timestamp=1.0)
         engine.process(lm_tap, timestamp=1.05)
-        r_click1 = engine.process(lm_open, timestamp=1.18)
-        self.assertEqual(r_click1["action"], "CLICK")
-        pos1 = (r_click1["cursor_x"], r_click1["cursor_y"])
+        r1 = engine.process(lm_fist, timestamp=1.15)
+        self.assertEqual(r1["action"], "CLICK")
 
-        engine.process(lm_tap, timestamp=1.30)
-        r_click2 = engine.process(lm_open, timestamp=1.42)
-        self.assertEqual(r_click2["action"], "DOUBLE_CLICK")
-        pos2 = (r_click2["cursor_x"], r_click2["cursor_y"])
-        self.assertEqual(pos1, pos2)
+        engine.process(lm_tap, timestamp=1.25)
+        r2 = engine.process(lm_fist, timestamp=1.35)
+        self.assertEqual(r2["action"], "DOUBLE_CLICK")
 
-    def test_pinch_to_drag_and_release(self):
-        """Verifies Thumb+Index pinch triggers intentional drag without accidental drag on normal taps."""
+    def test_open_hand_no_left_click(self):
+        """Touching index to thumb while hand is open (not a fist) does NOT trigger left click."""
         engine = GestureEngine(screen_width=1920, screen_height=1080)
-        lm_open = self._create_mock_landmarks(pinch_drag=False)
-        lm_pinch = self._create_mock_landmarks(pinch_drag=True)
+        # Index and thumb touching, but fingers are open (not a fist, not super)
+        lm_open_touch = self._create_mock_landmarks(fist_closed=False)
+        lm_open_touch[4] = SimpleNamespace(x=0.42, y=0.50, z=0.0)
+        lm_open_touch[8] = SimpleNamespace(x=0.425, y=0.50, z=0.0)
+
+        scale = engine._get_hand_scale(lm_open_touch)
+        tap_ratio, is_contact = engine.compute_tap_metric(lm_open_touch, scale)
+        self.assertFalse(is_contact)
+
+    def test_drag_super_gesture_and_release(self):
+        """Index on thumb with last three fingers UP engages Drag."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080)
+        lm_open = self._create_mock_landmarks(fist_closed=False)
+        lm_drag = self._create_mock_landmarks(drag_super_pose=True)
 
         engine.process(lm_open, timestamp=1.0)
-        engine.process(lm_pinch, timestamp=1.05)
-        # After pinch held >= 220ms
-        r_drag = engine.process(lm_pinch, timestamp=1.30)
+        engine.process(lm_drag, timestamp=1.05)
+        # Held >= 150ms
+        r_drag = engine.process(lm_drag, timestamp=1.25)
         self.assertEqual(r_drag["action"], "DRAG_START")
         self.assertTrue(engine.is_dragging)
 
-        # Release pinch
-        r_release = engine.process(lm_open, timestamp=1.40)
+        # Release drag
+        r_release = engine.process(lm_open, timestamp=1.35)
         self.assertEqual(r_release["action"], "DRAG_RELEASE")
         self.assertFalse(engine.is_dragging)
 
-    def test_accidental_drag_eliminated(self):
-        """Holding index on middle tap for a long time does NOT accidentally engage drag."""
+    def test_right_click_index_middle_tap(self):
+        """Tapping index on middle fingertip triggers Right Click."""
         engine = GestureEngine(screen_width=1920, screen_height=1080)
-        lm_tap = self._create_mock_landmarks(tap_close=True)
-
-        engine.process(lm_tap, timestamp=1.0)
-        # Even after 500ms, index-on-middle tap is never promoted to drag!
-        r_held = engine.process(lm_tap, timestamp=1.55)
-        self.assertNotEqual(r_held["action"], "DRAG_START")
-        self.assertFalse(engine.is_dragging)
-
-    def test_angle_invariant_metric_separation(self):
-        """Verifies that when hand is viewed at an angle, local knuckle frame detects separation."""
-        engine = GestureEngine(screen_width=1920, screen_height=1080)
-        lm_open = self._create_mock_landmarks(tap_close=False)
-        scale = engine._get_hand_scale(lm_open)
-        tap_ratio, _ = engine.compute_angle_invariant_tap_metric(lm_open, scale)
-        # Must be above tap_down_ratio so no false click happens
-        self.assertGreater(tap_ratio, engine.tap_down_ratio)
-
-    def test_super_gesture_detection(self):
-        engine = GestureEngine(screen_width=1920, screen_height=1080)
-        lm_super = self._create_mock_landmarks(super_pose=True)
-        is_detected = engine.is_super_gesture(lm_super)
-        self.assertTrue(is_detected)
-
-    def test_pointing_pose_extendedness_gate(self):
-        """Verifies that pointing with index finger alone (middle curled) NEVER registers false click."""
-        engine = GestureEngine(screen_width=1920, screen_height=1080)
-        # Even if tips are close in 2D/3D projection, curled middle disables tap
-        lm_pointing = self._create_mock_landmarks(tap_close=True, middle_curled=True)
-        scale = engine._get_hand_scale(lm_pointing)
-        tap_ratio, is_contact = engine.compute_tap_metric(lm_pointing, scale)
-        self.assertEqual(tap_ratio, 1.0)
-        self.assertFalse(is_contact)
-
-        res = engine.process(lm_pointing, timestamp=1.0)
-        self.assertEqual(res["action"], "MOVE")
-
-    def test_non_freezing_anchor_lock(self):
-        """Anchor lock must release after at most 70ms and not freeze cursor permanently."""
-        engine = GestureEngine(screen_width=1920, screen_height=1080)
-        lm_open = self._create_mock_landmarks(tap_close=False)
-        lm_tap = self._create_mock_landmarks(tap_close=True)
+        lm_open = self._create_mock_landmarks(fist_closed=False)
+        lm_right_tap = self._create_mock_landmarks(right_click_tap=True)
 
         engine.process(lm_open, timestamp=1.0)
-        r_down = engine.process(lm_tap, timestamp=1.05)
-        self.assertEqual(r_down["action"], "TAP_CONTACT")
+        r_down = engine.process(lm_right_tap, timestamp=1.05)
+        self.assertEqual(r_down["action"], "RIGHT_CONTACT")
 
-        # After 100ms (> 70ms anchor window), cursor must follow hand and anchor must be released
-        lm_tap_moved = self._create_mock_landmarks(tap_close=True, index_tip_y=0.25, middle_tip_y=0.25)
-        r_moved = engine.process(lm_tap_moved, timestamp=1.16)
-        self.assertIsNone(engine.anchor_position)
+        r_up = engine.process(lm_open, timestamp=1.18)
+        self.assertEqual(r_up["action"], "RIGHT_CLICK")
 
     def test_reset_hand_state(self):
-        """When hand leaves field of view, reset_hand_state clears all sticky states."""
+        """When hand leaves view, reset_hand_state clears all active states."""
         engine = GestureEngine(screen_width=1920, screen_height=1080)
-        lm_tap = self._create_mock_landmarks(tap_close=True)
+        lm_tap = self._create_mock_landmarks(fist_left_tap=True)
         engine.process(lm_tap, timestamp=1.0)
         self.assertEqual(engine.tap_state, "DOWN")
 
         engine.reset_hand_state()
         self.assertEqual(engine.tap_state, "UP")
-        self.assertIsNone(engine.anchor_position)
+        self.assertEqual(engine.right_click_state, "UP")
         self.assertFalse(engine.is_dragging)
 
 
+    def test_fist_closed_helper(self):
+        """Verifies fist detection helper accurately differentiates open hand vs closed fist."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080)
+        lm_open = self._create_mock_landmarks(fist_closed=False)
+        scale_open = engine._get_hand_scale(lm_open)
+        self.assertFalse(engine.is_fist_closed(lm_open, scale_open))
+
+        lm_fist = self._create_mock_landmarks(fist_closed=True)
+        scale_fist = engine._get_hand_scale(lm_fist)
+        self.assertTrue(engine.is_fist_closed(lm_fist, scale_fist))
+
+    def test_right_click_middle_curled_immune(self):
+        """If middle finger is curled, index touching it does NOT trigger right click."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080)
+        lm = self._create_mock_landmarks(right_click_tap=True)
+        # Force middle finger curled
+        lm[12] = SimpleNamespace(x=0.50, y=0.58, z=0.0)
+        res = engine.process(lm, timestamp=1.0)
+        self.assertNotEqual(res["action"], "RIGHT_CONTACT")
+
+
 class TestTargetLockManager(unittest.TestCase):
-    def test_magnetic_attraction_and_breakout(self):
-        mgr = TargetLockManager(capture_radius=40.0, breakout_velocity=350.0)
+    def test_sticky_aim_assist_cling_and_breakout(self):
+        """Verifies cursor CLINGS directly to button center and breaks out on fast flick."""
+        mgr = TargetLockManager(capture_radius=40.0, breakout_velocity=260.0)
         mgr._override_target = {
             "role": ROLE_SYSTEM_PUSHBUTTON,
             "role_name": "CLOSE [X]",
@@ -255,15 +255,34 @@ class TestTargetLockManager(unittest.TestCase):
             "center": (1323.0, 66.0),
         }
 
-        near_x, near_y = 1310.0, 60.0
-        snapped_x, snapped_y, is_locked, desc = mgr.apply_magnetic_lock(near_x, near_y, velocity=15.0, timestamp=1.0)
+        near_x, near_y = 1315.0, 58.0
+        snapped_x, snapped_y, is_locked, desc = mgr.apply_magnetic_lock(near_x, near_y, velocity=20.0, timestamp=1.0)
         self.assertTrue(is_locked)
         self.assertEqual(desc, "CLOSE [X]")
-        self.assertGreater(snapped_x, near_x)
+        # Must CLING directly to center (1323, 66)
+        self.assertEqual(snapped_x, 1323)
+        self.assertEqual(snapped_y, 66)
 
-        bx, by, is_locked2, desc2 = mgr.apply_magnetic_lock(near_x, near_y, velocity=450.0, timestamp=1.1)
+        # Fast hand flick exceeds breakout velocity
+        bx, by, is_locked2, desc2 = mgr.apply_magnetic_lock(near_x, near_y, velocity=350.0, timestamp=1.1)
         self.assertFalse(is_locked2)
         self.assertEqual(bx, int(near_x))
+
+    def test_sticky_aim_assist_inside_bounding_box(self):
+        """Verifies cursor inside element bounding box clings to center even if not dead-center."""
+        mgr = TargetLockManager(capture_radius=30.0, breakout_velocity=260.0)
+        mgr._override_target = {
+            "role": ROLE_SYSTEM_PUSHBUTTON,
+            "role_name": "MAXIMIZE [□]",
+            "rect": (1250, 50, 46, 32),
+            "center": (1273.0, 66.0),
+        }
+
+        corner_x, corner_y = 1252.0, 52.0
+        snapped_x, snapped_y, is_locked, desc = mgr.apply_magnetic_lock(corner_x, corner_y, velocity=15.0, timestamp=1.0)
+        self.assertTrue(is_locked)
+        self.assertEqual(snapped_x, 1273)
+        self.assertEqual(snapped_y, 66)
 
 
 class TestInputAndAutostart(unittest.TestCase):
@@ -275,6 +294,7 @@ class TestInputAndAutostart(unittest.TestCase):
     def test_autostart_command_string(self):
         cmd = get_launch_command()
         self.assertIn("main.py", cmd)
+        self.assertIn("--autostart", cmd)
 
 
 if __name__ == "__main__":

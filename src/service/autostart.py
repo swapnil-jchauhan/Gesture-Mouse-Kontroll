@@ -25,7 +25,7 @@ def get_launch_command() -> str:
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
     main_script = os.path.join(project_root, "main.py")
 
-    return f'"{exe}" "{main_script}"'
+    return f'"{exe}" "{main_script}" --autostart'
 
 
 def is_autostart_enabled() -> bool:
