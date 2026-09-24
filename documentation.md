@@ -63,28 +63,37 @@ Inspired by futuristic "Jarvis-like" AR interfaces, Project Kontroll eliminates 
 ## 3. Detailed Gesture Specifications
 
 ### 3.1 Cursor Positioning
-- **Tracking Anchor**: Index finger tip (`Landmark 8`) stabilized with Midpoint (`(Landmark 8 + Landmark 12) / 2`) during rest.
-- **Active Area (Dynamic Virtual Mousepad)**: A centered sub-rectangle of the camera view (e.g. 60% width x 55% height) maps linearly to full screen resolution (e.g., 1920x1080 or 4K). This prevents hand fatigue and allows reaching all screen corners with small hand movements.
+- **Tracking Anchor**: Index finger tip (`Landmark 8`) with horizontal mirroring (`norm_x = 1.0 - x`) so moving the physical hand right moves the cursor right.
+- **Active Area (Dynamic Virtual Mousepad)**: Ergonomic rest box centered where the user rests their forearm/elbow on the desk (`xmin=0.28, xmax=0.70, ymin=0.44, ymax=0.78`) with cubic S-curve acceleration. Reaches all 4 screen corners with relaxed 2-inch wrist motions.
+- **Stabilization**: One Euro Filter with pseudo-haptic stillness deadband (2.8 px), eliminating sensor noise and tremor when holding still.
 
-### 3.2 The "Tap Index on Middle" Click
-- **Principle**: Instead of pinching thumb and index (which pulls the index finger downward and shifts the cursor off target), the user lightly taps their index fingertip against their middle fingertip.
+### 3.2 The Closed Fist Left Click & Double Click ✊
+- **Principle**: The user curls their middle, ring, and pinky fingers into a closed fist and lightly taps their index fingertip on their thumb fingertip.
 - **Metric**:
-  $$\text{Ratio} = \frac{\|\mathbf{P}_{\text{IndexTip}} - \mathbf{P}_{\text{MiddleTip}}\|}{\|\mathbf{P}_{\text{Wrist}} - \mathbf{P}_{\text{MiddleMCP}}\|}$$
-  Normalizing by hand scale ensures identical detection distance whether the hand is 30 cm or 120 cm from the camera.
-- **States**:
-  - `TAP_DOWN`: Distance drops below threshold $\tau_{\text{click}}$. Immediate freeze of cursor position to guarantee pixel-accurate clicks.
-  - `TAP_UP`: Quick release (< 250 ms) triggers `MOUSEEVENTF_LEFTUP` (single click).
-  - `TAP_DRAG`: Sustained contact (> 250 ms) keeps left button held down for dragging or text selection.
+  $$\text{Ratio} = \frac{\|\mathbf{P}_{\text{IndexTip}} - \mathbf{P}_{\text{ThumbTip}}\|}{\|\mathbf{P}_{\text{Wrist}} - \mathbf{P}_{\text{MiddleMCP}}\|}$$
+  When fingers are in a closed fist and ratio drops below 0.18, click contact is registered. Quick release fires a left click; two taps within 380 ms fire a double click.
 
-### 3.3 The "Super" Activation Gesture
-- **Pose**: The "OK / Super" pose — Thumb and Index form a ring or curl, while the **last three fingers (Middle, Ring, Pinky)** are pointed fully upright.
-- **Detection**:
-  - Distance between Thumb Tip (`Landmark 4`) and Index Tip (`Landmark 8`) is small.
-  - Middle Tip (`Landmark 12`), Ring Tip (`Landmark 16`), and Pinky Tip (`Landmark 20`) are extended above their respective PIP joints:
-    $$y_{\text{Tip}} < y_{\text{PIP}} \quad (\text{in screen coordinates})$$
+### 3.3 The Shaka Activation Gesture 🤙
+- **Pose**: Hawaiian Shaka sign — Thumb (`Landmark 4`) and Pinky (`Landmark 20`) are extended OUT, while the middle three fingers (Index 8, Middle 12, Ring 16) are curled IN against the palm.
 - **Behavior**:
-  - Toggles Kontroll between **ACTIVE** and **STANDBY**.
-  - Triggers the Jarvis Holographic HUD popup animation on the screen.
+  - Holding Shaka for 0.35s toggles Kontroll between **ACTIVE** and **STANDBY**.
+  - Triggers the Jarvis Holographic HUD popup alert and updates system tray state.
+
+### 3.4 Drag & Drop (Super Sign 👌)
+- **Pose**: Index fingertip touches Thumb fingertip while the last three fingers (Middle, Ring, Pinky) remain extended straight UP.
+- **Behavior**:
+  - Holding for >= 140 ms locks left mouse down (`DRAG_START`) for moving windows or selecting text.
+  - Releasing pinch fires `DRAG_RELEASE`.
+
+### 3.5 Right Click ✌️
+- **Pose**: Lightly tap Index fingertip on Middle fingertip with both fingers extended.
+- **Behavior**: Fires native Windows right-click event to open context menus.
+
+### 3.6 Hard Sticky Aim Assist & Click Anchor
+- **Principle**: Automatically detects clickable UI elements (buttons, Chrome tabs, links, icons, taskbar items, title bar controls) via Windows UI Automation, MSAA, and Win32 hit-testing.
+- **Sticky Gravity**: When entering the button capture radius, the cursor snaps and clings rigidly to the button center.
+- **Click Anchor**: During tap contact or click motion (`is_clicking=True`), the lock is immutable against localized finger twitches.
+- **Breakout**: Only releases when the user substantially pulls away (> 65-75 px from target) or performs an intentional fast wrist flick (> 750 px/s).
 
 ---
 
@@ -141,8 +150,14 @@ Inspired by futuristic "Jarvis-like" AR interfaces, Project Kontroll eliminates 
 - **Closed-Fist Index-Thumb Tap for Left Click**: Left clicks and double clicks are triggered by tapping index on thumb while the middle, ring, and pinky fingers are curled into a closed fist.
 - **Drag & Drop**: Holding index on thumb while the last three fingers remain straight up engages window dragging and text selection, releasing cleanly when the pinch separates.
 - **Right Click**: Tapping index on middle fingertip triggers a native Windows right click.
-- **120 Hz Dead-Reckoning Extrapolation**: Interpolates between camera frames at 120 Hz with velocity decay, delivering butter-smooth motion on high refresh rate monitors without lag.
 - **Jarvis Boot Sequence HUD**: Multi-stage holographic power-up animation with rising frequency audio chimes on Windows login, executing silently in background with pythonw.exe without any cmd console popups.
-- **Verification**: All 15 unit tests passing with 100% success rate.
+
+### Phase 8: Mirrored Natural Tracking, Jitter Elimination, Hard Sticky Lock & Shaka Activation (Completed)
+- **Mirrored Natural Tracking**: Horizontally mirrored normalized index tracking (`norm_x = 1.0 - x`) so moving the physical hand to the right moves the screen cursor to the right across any setup.
+- **Jitter Elimination**: Completely eliminated inter-frame dead-reckoning extrapolation in `main.py` that caused high-frequency 60-120 Hz micro-jump coordinate oscillations against camera frames. Direct 1€-filtered coordinates now dispatch cleanly on frame arrival with zero jitter.
+- **Hard Sticky Aim Assist & Click Anchor**: Upgraded TargetLockManager with a 750 px/s breakout threshold and generous 65 px padding. When tapping or clicking (`is_clicking=True`), the cursor is firmly anchored to the button center and will not slip off from finger twitching, breaking out only on intentional pull away or deliberate wrist flicks.
+- **Shaka Gesture Activation**: Integrated Hawaiian Shaka sign (🤙, thumb and pinky extended, middle three curled) detection with 0.35s hold debounce to toggle Kontroll between ACTIVE and STANDBY, with holographic HUD notifications.
+- **Diagnostic HUD Mirroring**: Video preview in the calibration HUD is now flipped horizontally, acting like a mirror with live Shaka gesture telemetry.
+- **Comprehensive Verification**: Expanded test suite to 19 automated tests covering 1€ filtering, mirrored tracking, Shaka detection, activation state transitions, click anchoring, and hard sticky aim assist. All 19 tests passing with 100% success rate.
 
 

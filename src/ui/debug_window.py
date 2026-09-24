@@ -103,13 +103,16 @@ class DebugWindow(QWidget):
         self.fps_label = QLabel("CAMERA: -- FPS")
         self.status_label = QLabel("STATUS: ACTIVE")
         self.status_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
-        self.super_label = QLabel("SUPER GESTURE: OFF")
+        self.shaka_label = QLabel("SHAKA: OFF 🤙")
+        self.shaka_label.setStyleSheet("color: #718096;")
+        self.super_label = QLabel("DRAG POSE: OFF")
         self.super_label.setStyleSheet("color: #718096;")
         self.lock_label = QLabel("TARGET: FREE")
         self.lock_label.setStyleSheet("color: #718096; font-weight: bold;")
 
         telemetry_layout.addWidget(self.fps_label)
         telemetry_layout.addWidget(self.status_label)
+        telemetry_layout.addWidget(self.shaka_label)
         telemetry_layout.addWidget(self.super_label)
         telemetry_layout.addWidget(self.lock_label)
         layout.addLayout(telemetry_layout)
@@ -170,36 +173,50 @@ class DebugWindow(QWidget):
             self.action_label.setText("NO HAND")
             self.action_label.setStyleSheet("color: #718096; font-style: italic; padding-left: 10px;")
             self.tap_bar.setValue(0)
-            self.super_label.setText("SUPER GESTURE: OFF")
+            self.shaka_label.setText("SHAKA: OFF")
+            self.shaka_label.setStyleSheet("color: #718096;")
+            self.super_label.setText("DRAG POSE: OFF")
             self.super_label.setStyleSheet("color: #718096;")
             self.lock_label.setText("TARGET: FREE")
             self.lock_label.setStyleSheet("color: #718096; font-weight: bold;")
         else:
+            is_shaka = self.gesture_engine.is_shaka_gesture(landmarks)
             is_dragging = getattr(self.gesture_engine, "is_dragging", False)
             tap_state = getattr(self.gesture_engine, "tap_state", "UP")
             right_state = getattr(self.gesture_engine, "right_click_state", "UP")
-            if is_dragging:
-                self.action_label.setText("ACTION: DRAGGING (👌)")
-                self.action_label.setStyleSheet("color: #ffaa00; font-weight: bold; padding-left: 10px;")
-            elif tap_state == "DOWN":
-                self.action_label.setText("ACTION: LEFT CLICK CONTACT ⚡")
-                self.action_label.setStyleSheet("color: #00ffaa; font-weight: bold; padding-left: 10px;")
-            elif right_state == "DOWN":
-                self.action_label.setText("ACTION: RIGHT CLICK CONTACT ⚡")
-                self.action_label.setStyleSheet("color: #00e0ff; font-weight: bold; padding-left: 10px;")
-            else:
-                self.action_label.setText("ACTION: MOVE")
+
+            if is_shaka:
+                self.shaka_label.setText("SHAKA: ACTIVE 🤙")
+                self.shaka_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
+                self.action_label.setText("ACTION: SHAKA TOGGLE 🤙")
                 self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
+            else:
+                self.shaka_label.setText("SHAKA: OFF")
+                self.shaka_label.setStyleSheet("color: #718096;")
+
+                if is_dragging:
+                    self.action_label.setText("ACTION: DRAGGING (👌)")
+                    self.action_label.setStyleSheet("color: #ffaa00; font-weight: bold; padding-left: 10px;")
+                elif tap_state == "DOWN":
+                    self.action_label.setText("ACTION: LEFT CLICK CONTACT ⚡")
+                    self.action_label.setStyleSheet("color: #00ffaa; font-weight: bold; padding-left: 10px;")
+                elif right_state == "DOWN":
+                    self.action_label.setText("ACTION: RIGHT CLICK CONTACT ⚡")
+                    self.action_label.setStyleSheet("color: #00e0ff; font-weight: bold; padding-left: 10px;")
+                else:
+                    self.action_label.setText("ACTION: MOVE")
+                    self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
 
         if frame is None:
             return
 
-        display_frame = frame.copy()
+        # Mirror video preview so it acts naturally like a selfie / looking glass
+        display_frame = cv2.flip(frame, 1)
         h, w, _ = display_frame.shape
 
-        # Draw Ergonomic Comfort Zone (Yellow box)
-        bx1 = int(self.gesture_engine.box_xmin * w)
-        bx2 = int(self.gesture_engine.box_xmax * w)
+        # Draw Ergonomic Comfort Zone (Yellow box) in mirrored frame space
+        bx1 = int((1.0 - self.gesture_engine.box_xmax) * w)
+        bx2 = int((1.0 - self.gesture_engine.box_xmin) * w)
         by1 = int(self.gesture_engine.box_ymin * h)
         by2 = int(self.gesture_engine.box_ymax * h)
         cv2.rectangle(display_frame, (bx1, by1), (bx2, by2), (255, 240, 0), 2)
@@ -219,7 +236,7 @@ class DebugWindow(QWidget):
 
             points = []
             for lm in landmarks:
-                px = int(lm.x * w)
+                px = int((1.0 - lm.x) * w)
                 py = int(lm.y * h)
                 points.append((px, py))
 
@@ -227,8 +244,8 @@ class DebugWindow(QWidget):
                 cv2.line(display_frame, points[p1], points[p2], (180, 120, 40), 1)
 
             for idx, pt in enumerate(points):
-                color = (0, 255, 255) if idx in (4, 8, 12) else (100, 200, 255)
-                cv2.circle(display_frame, pt, 3 if idx not in (4, 8, 12) else 6, color, -1)
+                color = (0, 255, 255) if idx in (4, 8, 12, 20) else (100, 200, 255)
+                cv2.circle(display_frame, pt, 3 if idx not in (4, 8, 12, 20) else 6, color, -1)
 
             # Thumb (4), Index (8), Middle (12) tracking lines
             p4 = points[4]
@@ -243,8 +260,8 @@ class DebugWindow(QWidget):
             scale = self.gesture_engine._get_hand_scale(landmarks)
             tap_ratio, _ = self.gesture_engine.compute_tap_metric(landmarks, scale)
 
-            # Update tap progress bar
-            pct = max(0, min(100, int((1.0 - (tap_ratio / 0.45)) * 100)))
+            # Update tap progress bar (reaches 100% on contact)
+            pct = max(0, min(100, int(((0.45 - tap_ratio) / (0.45 - 0.25)) * 100)))
             self.tap_bar.setValue(pct)
 
             # Drag pose status

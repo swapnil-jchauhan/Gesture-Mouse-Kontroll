@@ -133,19 +133,30 @@ class MouseSimulator:
             self.click()
         threading.Thread(target=_dc, daemon=True).start()
 
+    def drag_start(self):
+        """
+        Initiates native Windows drag with a double-click-and-hold sequence:
+        DOWN -> UP -> DOWN (held). This ensures background windows are focused,
+        files and desktop icons enter drag mode, and text selection begins reliably.
+        """
+        inputs = (INPUT * 3)()
+        inputs[0].type = INPUT_MOUSE
+        inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN
+        inputs[1].type = INPUT_MOUSE
+        inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP
+        inputs[2].type = INPUT_MOUSE
+        inputs[2].mi.dwFlags = MOUSEEVENTF_LEFTDOWN
+        self.user32.SendInput(3, inputs, ctypes.sizeof(INPUT))
+        self._is_left_down = True
+
     def right_click(self):
-        """Perform a single right mouse click."""
-        inp_down = INPUT()
-        inp_down.type = INPUT_MOUSE
-        inp_down.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN
-
-        inp_up = INPUT()
-        inp_up.type = INPUT_MOUSE
-        inp_up.mi.dwFlags = MOUSEEVENTF_RIGHTUP
-
-        self.user32.SendInput(1, ctypes.byref(inp_down), ctypes.sizeof(INPUT))
-        time.sleep(0.015)
-        self.user32.SendInput(1, ctypes.byref(inp_up), ctypes.sizeof(INPUT))
+        """Perform an instantaneous hardware-level right mouse click."""
+        inputs = (INPUT * 2)()
+        inputs[0].type = INPUT_MOUSE
+        inputs[0].mi.dwFlags = MOUSEEVENTF_RIGHTDOWN
+        inputs[1].type = INPUT_MOUSE
+        inputs[1].mi.dwFlags = MOUSEEVENTF_RIGHTUP
+        self.user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
 
     def scroll(self, steps: int):
         """Scroll vertical wheel. Positive for up, negative for down."""

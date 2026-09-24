@@ -100,7 +100,7 @@ class TargetLockManager:
     directly onto the button when in close proximity, preventing twitch drift during taps.
     """
 
-    def __init__(self, capture_radius: float = 38.0, breakout_velocity: float = 260.0):
+    def __init__(self, capture_radius: float = 42.0, breakout_velocity: float = 750.0):
         self.capture_radius = capture_radius
         self.breakout_velocity = breakout_velocity
 
@@ -311,32 +311,50 @@ class TargetLockManager:
         raw_y: float,
         velocity: float = 0.0,
         timestamp: float = 0.0,
+        is_clicking: bool = False,
     ) -> Tuple[int, int, bool, Optional[str]]:
         """
         Applies OS-Level Sticky Aim Assist.
         When near any clickable element, the cursor clings securely to the target center.
-        When moving with breakout velocity or pulling away, cursor breaks out freely.
+        During click motions (is_clicking=True), lock is firmly anchored against finger twitches.
+        When pulling substantially away from the zone or swiping with high intentional flick speed,
+        the cursor breaks out cleanly.
         """
         override = getattr(self, "_override_target", None)
-        if override is not None:
-            target = override
-        else:
-            # 1. If currently locked, test if still within target's sticky gravity well
-            if self.is_locked and self.last_target_rect is not None and self.last_target_center is not None:
-                left, top, width, height = self.last_target_rect
-                tcx, tcy = self.last_target_center
-                pad = max(self.capture_radius, 32.0)
-                inside_pad = (left - pad <= raw_x <= left + width + pad) and (top - pad <= raw_y <= top + height + pad)
-                dist = math.hypot(raw_x - tcx, raw_y - tcy)
 
-                # Cling to target center if still within range and below breakout velocity
-                if (inside_pad or dist <= self.capture_radius * 1.5) and velocity < self.breakout_velocity:
+        # 1. If currently locked, evaluate sticky gravity well retention
+        if self.is_locked and self.last_target_rect is not None and self.last_target_center is not None:
+            left, top, width, height = self.last_target_rect
+            tcx, tcy = self.last_target_center
+            pad = max(self.capture_radius, 65.0)
+            inside_pad = (left - pad <= raw_x <= left + width + pad) and (top - pad <= raw_y <= top + height + pad)
+            dist = math.hypot(raw_x - tcx, raw_y - tcy)
+            max_stick_dist = max(width, height) / 2.0 + 75.0
+
+            # Active Click Anchor: During taps/clicks, hold lock rigidly unless pulled far away (> 120 px)
+            if is_clicking:
+                if dist <= 120.0 or inside_pad:
                     return int(round(tcx)), int(round(tcy)), True, self.last_target_name
                 else:
-                    # Breakout cleanly
+                    self.is_locked = False
+                    self._cached_target = None
+            else:
+                # Retention zone: Stay locked unless user substantially, intentionally pulls away
+                should_breakout = False
+                if not inside_pad and dist > max_stick_dist:
+                    should_breakout = True
+                elif velocity >= self.breakout_velocity and dist >= 35.0:
+                    should_breakout = True
+
+                if not should_breakout:
+                    return int(round(tcx)), int(round(tcy)), True, self.last_target_name
+                else:
                     self.is_locked = False
                     self._cached_target = None
 
+        if override is not None:
+            target = override
+        else:
             # 2. Query target for current cursor position
             target = self._cached_target
             if (timestamp - self._last_query_time) >= self._query_interval or target is None:
@@ -363,7 +381,7 @@ class TargetLockManager:
         dist = math.hypot(dx, dy)
 
         # Check if inside bounding box (with capture padding)
-        pad = max(self.capture_radius, 28.0)
+        pad = max(self.capture_radius, 40.0)
         inside_box = (left - pad <= raw_x <= left + width + pad) and (top - pad <= raw_y <= top + height + pad)
 
         if (inside_box or dist <= self.capture_radius) and velocity < self.breakout_velocity:

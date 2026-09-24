@@ -77,6 +77,7 @@ class TestGestureEngine(unittest.TestCase):
         fist_left_tap=False,
         drag_super_pose=False,
         right_click_tap=False,
+        shaka_pose=False,
     ):
         lm = [SimpleNamespace(x=0.5, y=0.8, z=0.0) for _ in range(21)]
         # Wrist = 0
@@ -135,6 +136,17 @@ class TestGestureEngine(unittest.TestCase):
             # Index tip touches Middle tip, both extended
             lm[8] = SimpleNamespace(x=0.495, y=0.35, z=0.0)
             lm[12] = SimpleNamespace(x=0.50, y=0.35, z=0.0)
+
+        if shaka_pose:
+            # Thumb (4) and Pinky (20) extended OUT, Index (8), Middle (12), Ring (16) curled
+            lm[4] = SimpleNamespace(x=0.22, y=0.44, z=0.0)
+            lm[20] = SimpleNamespace(x=0.74, y=0.38, z=0.0)
+            lm[6] = SimpleNamespace(x=0.42, y=0.55, z=0.0)
+            lm[8] = SimpleNamespace(x=0.42, y=0.62, z=0.0)
+            lm[10] = SimpleNamespace(x=0.50, y=0.55, z=0.0)
+            lm[12] = SimpleNamespace(x=0.50, y=0.62, z=0.0)
+            lm[14] = SimpleNamespace(x=0.56, y=0.55, z=0.0)
+            lm[16] = SimpleNamespace(x=0.56, y=0.62, z=0.0)
 
         return lm
 
@@ -243,11 +255,69 @@ class TestGestureEngine(unittest.TestCase):
         res = engine.process(lm, timestamp=1.0)
         self.assertNotEqual(res["action"], "RIGHT_CONTACT")
 
+    def test_mirrored_horizontal_tracking(self):
+        """Moving hand to physical right (camera image left) moves cursor to the right on screen."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080)
+        engine.mount_mode = "center"
+
+        # In camera frame, x=0.35 is camera-left (user's physical right)
+        lm_right = self._create_mock_landmarks()
+        lm_right[8] = SimpleNamespace(x=0.35, y=0.60, z=0.0)
+        r_right = engine.process(lm_right, timestamp=1.0)
+
+        # In camera frame, x=0.65 is camera-right (user's physical left)
+        lm_left = self._create_mock_landmarks()
+        lm_left[8] = SimpleNamespace(x=0.65, y=0.60, z=0.0)
+        r_left = engine.process(lm_left, timestamp=1.1)
+
+        self.assertGreater(r_right["cursor_x"], r_left["cursor_x"])
+
+    def test_shaka_gesture_detection(self):
+        """Verifies Shaka gesture (🤙, thumb & pinky out, middle 3 curled) is accurately detected."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080)
+        lm_shaka = self._create_mock_landmarks(shaka_pose=True)
+        self.assertTrue(engine.is_shaka_gesture(lm_shaka))
+
+        lm_open = self._create_mock_landmarks(fist_closed=False)
+        self.assertFalse(engine.is_shaka_gesture(lm_open))
+
+        lm_fist = self._create_mock_landmarks(fist_closed=True)
+        self.assertFalse(engine.is_shaka_gesture(lm_fist))
+
+    def test_shaka_activation_toggle(self):
+        """Holding Shaka gesture for >= 0.35s toggles system state between ACTIVE and STANDBY."""
+        toggled_states = []
+        engine = GestureEngine(screen_width=1920, screen_height=1080, on_state_change=lambda s: toggled_states.append(s))
+        self.assertTrue(engine.is_active)
+
+        lm_shaka = self._create_mock_landmarks(shaka_pose=True)
+        lm_open = self._create_mock_landmarks(fist_closed=False)
+
+        # Start holding Shaka
+        engine.process(lm_shaka, timestamp=1.0)
+        self.assertTrue(engine.is_active)
+
+        # Held for 0.40s -> Toggles to STANDBY
+        res_toggle1 = engine.process(lm_shaka, timestamp=1.40)
+        self.assertFalse(engine.is_active)
+        self.assertIn(False, toggled_states)
+
+        # Open hand while in standby returns STANDBY action and no clicks
+        res_standby = engine.process(lm_open, timestamp=1.50)
+        self.assertFalse(res_standby["active"])
+        self.assertEqual(res_standby["action"], "STANDBY")
+
+        # Hold Shaka again to wake up / activate
+        engine.process(lm_shaka, timestamp=2.0)
+        res_toggle2 = engine.process(lm_shaka, timestamp=2.40)
+        self.assertTrue(engine.is_active)
+        self.assertIn(True, toggled_states)
+
 
 class TestTargetLockManager(unittest.TestCase):
     def test_sticky_aim_assist_cling_and_breakout(self):
-        """Verifies cursor CLINGS directly to button center and breaks out on fast flick."""
-        mgr = TargetLockManager(capture_radius=40.0, breakout_velocity=260.0)
+        """Verifies cursor CLINGS directly to button center, resists twitch, and breaks out on intentional flick."""
+        mgr = TargetLockManager(capture_radius=42.0, breakout_velocity=750.0)
         mgr._override_target = {
             "role": ROLE_SYSTEM_PUSHBUTTON,
             "role_name": "CLOSE [X]",
@@ -263,14 +333,40 @@ class TestTargetLockManager(unittest.TestCase):
         self.assertEqual(snapped_x, 1323)
         self.assertEqual(snapped_y, 66)
 
-        # Fast hand flick exceeds breakout velocity
-        bx, by, is_locked2, desc2 = mgr.apply_magnetic_lock(near_x, near_y, velocity=350.0, timestamp=1.1)
+        # Finger twitch velocity (e.g. 400 px/s) while hovering button stays firmly locked!
+        sx, sy, is_locked_twitch, _ = mgr.apply_magnetic_lock(near_x, near_y, velocity=400.0, timestamp=1.05)
+        self.assertTrue(is_locked_twitch)
+        self.assertEqual(sx, 1323)
+        self.assertEqual(sy, 66)
+
+        # Deliberate fast flick away (velocity > 750 px/s at dist >= 35) breaks out cleanly
+        flick_x, flick_y = 1260.0, 50.0
+        bx, by, is_locked2, desc2 = mgr.apply_magnetic_lock(flick_x, flick_y, velocity=850.0, timestamp=1.1)
         self.assertFalse(is_locked2)
-        self.assertEqual(bx, int(near_x))
+        self.assertEqual(bx, int(flick_x))
+
+    def test_sticky_aim_assist_click_anchor(self):
+        """Verifies that during active click motion (is_clicking=True), lock is firmly anchored."""
+        mgr = TargetLockManager(capture_radius=42.0, breakout_velocity=750.0)
+        mgr._override_target = {
+            "role": ROLE_SYSTEM_PUSHBUTTON,
+            "role_name": "SUBMIT",
+            "rect": (500, 400, 80, 40),
+            "center": (540.0, 420.0),
+        }
+        # Initial lock onto button
+        mgr.apply_magnetic_lock(535.0, 415.0, velocity=15.0, timestamp=1.0)
+        self.assertTrue(mgr.is_locked)
+
+        # Finger twitch tap with high velocity and slight drift while clicking
+        sx, sy, locked, _ = mgr.apply_magnetic_lock(560.0, 435.0, velocity=600.0, timestamp=1.05, is_clicking=True)
+        self.assertTrue(locked)
+        self.assertEqual(sx, 540)
+        self.assertEqual(sy, 420)
 
     def test_sticky_aim_assist_inside_bounding_box(self):
         """Verifies cursor inside element bounding box clings to center even if not dead-center."""
-        mgr = TargetLockManager(capture_radius=30.0, breakout_velocity=260.0)
+        mgr = TargetLockManager(capture_radius=30.0, breakout_velocity=750.0)
         mgr._override_target = {
             "role": ROLE_SYSTEM_PUSHBUTTON,
             "role_name": "MAXIMIZE [□]",
@@ -295,6 +391,14 @@ class TestInputAndAutostart(unittest.TestCase):
         cmd = get_launch_command()
         self.assertIn("main.py", cmd)
         self.assertIn("--autostart", cmd)
+
+    def test_drag_start_initiates_double_click_hold(self):
+        mouse = MouseSimulator()
+        self.assertFalse(mouse._is_left_down)
+        mouse.drag_start()
+        self.assertTrue(mouse._is_left_down)
+        mouse.left_up()
+        self.assertFalse(mouse._is_left_down)
 
 
 if __name__ == "__main__":

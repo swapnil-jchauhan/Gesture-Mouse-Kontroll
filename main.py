@@ -116,7 +116,6 @@ class KontrollApp:
 
         # New Camera Frame Arrived
         if timestamp > self.last_frame_timestamp:
-            frame_dt = max(1e-4, timestamp - self.last_frame_timestamp)
             self.last_frame_timestamp = timestamp
 
             # Process gestures
@@ -127,9 +126,6 @@ class KontrollApp:
                 target_x = float(result.get("cursor_x", self.target_cursor_x))
                 target_y = float(result.get("cursor_y", self.target_cursor_y))
 
-                # Velocity estimate for dead-reckoning extrapolation
-                self.vel_x = (target_x - self.current_cursor_x) / frame_dt
-                self.vel_y = (target_y - self.current_cursor_y) / frame_dt
                 self.current_cursor_x = target_x
                 self.current_cursor_y = target_y
 
@@ -144,20 +140,9 @@ class KontrollApp:
                 elif action == "RIGHT_CLICK":
                     self.mouse.right_click()
                 elif action == "DRAG_START":
-                    self.mouse.left_down()
+                    self.mouse.drag_start()
                 elif action == "DRAG_RELEASE":
                     self.mouse.left_up()
-        else:
-            # 120 Hz dead-reckoning extrapolation between frames (only when moving and not locked)
-            if self.gestures.is_active and not getattr(self.gestures, "last_is_locked", False):
-                speed = math.hypot(self.vel_x, self.vel_y)
-                if speed > 30.0:
-                    self.current_cursor_x += self.vel_x * dt
-                    self.current_cursor_y += self.vel_y * dt
-                    decay = 0.85
-                    self.vel_x *= decay
-                    self.vel_y *= decay
-                    self.mouse.move_to(int(round(self.current_cursor_x)), int(round(self.current_cursor_y)))
 
     def run(self):
         return self.app.exec()

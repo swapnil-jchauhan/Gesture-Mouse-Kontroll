@@ -34,7 +34,9 @@ So I made this
 
 It is a lightweight software for Windows 11 that:
 * Uses any regular webcam, even cheap potato laptop cameras.
-* Has literal OS level sticky aim assist. When your cursor gets close to ANY clickable button, link, tab, Chrome UI, or taskbar icon, it clings directly onto it so you never miss a click.
+* Naturally tracks your hand in real time so moving right moves right with zero camera confusion.
+* Has literal OS level sticky aim assist. When your cursor gets close to ANY clickable button, link, tab, Chrome UI, or taskbar icon, it clings hard directly onto it so your clicks never slip off.
+* Can be turned on or off anytime with a quick Shaka sign 🤙.
 * When you log in on boot, it plays an epic Jarvis boot animation with sound effects and runs silently in the background with no black cmd console window.
 * Removes all jitter so the mouse moves butter smooth.
 
@@ -46,8 +48,9 @@ It is a lightweight software for Windows 11 that:
 
 | Gesture | What to do | What happens |
 | :--- | :--- | :--- |
-| Move Cursor | Point or move your hand comfortably (elbow on desk) | Pointer acceleration lets a 2 inch wrist flick reach screen edges |
-| Left Click ✊ | Make a closed fist and lightly tap your Index fingertip on your Thumb | Instant left click with zero drift |
+| Activate or Standby 🤙 | Stick your Thumb and Pinky out with your middle three fingers folded in (Shaka sign) | Toggles Kontroll active or standby with a holographic HUD alert |
+| Move Cursor | Point or move your hand comfortably with your elbow resting on your desk | Natural mirrored movement with pointer acceleration so a 2 inch wrist flick reaches screen edges |
+| Left Click ✊ | Make a closed fist and lightly tap your Index fingertip on your Thumb | Instant left click with zero drift and hard sticky lock on buttons |
 | Double Click ✊ | Tap index on thumb twice with a closed fist | Opens folders, apps, or selects words |
 | Drag and Select 👌 | Touch Index on Thumb but keep your last three fingers straight UP | Locks drag to move windows or highlight text, release to drop |
 | Right Click ✌️ | Lightly tap your Index fingertip on your Middle fingertip | Opens right click context menu |
@@ -125,6 +128,7 @@ python main.py --calibrate
 
 ## 4. Cool Tips
 
+* Shaka to Toggle: If you want to take a break or type without the mouse tracking, just flash the Shaka sign 🤙 for a second to put Kontroll into standby. Flash it again to wake it back up.
 * Resting your hand: If you need to type on your keyboard, just put your hand down on your desk. It will not move your cursor accidentally.
+* Hard Sticky Aim Assist: When you hover near buttons, context menus, or Chrome tabs, the cursor clings hard to the center. When you tap your fingers together, it will not slip or twitch off the button. To move to something else, just pull away or flick your wrist normally.
 * Low light rooms: Kontroll automatically boosts contrast on dark webcam frames, so it still tracks even in a dim bedroom at night.
-* Sticky Aim Assist: When you hover over buttons or Chrome tabs, the cursor clings to the center. To move away, just flick your hand normally and it breaks out freely.

@@ -43,30 +43,35 @@ class GestureEngine:
         self.cursor_filter = Point2DOneEuroFilter(freq=60.0, min_cutoff=0.8, beta=0.045, deadband_radius=2.2)
 
         # OS-Level Sticky Aim Assister
-        self.target_lock = TargetLockManager(capture_radius=40.0, breakout_velocity=260.0)
+        self.target_lock = TargetLockManager(capture_radius=42.0, breakout_velocity=750.0)
 
-        # Ergonomic Rest Box (forearm/elbow resting on desk)
-        self.box_xmin = 0.28
-        self.box_xmax = 0.70
-        self.box_ymin = 0.44
-        self.box_ymax = 0.78
+        # Ergonomic Rest Box (forearm/elbow resting on desk, compact wrist flick)
+        self.box_xmin = 0.36
+        self.box_xmax = 0.64
+        self.box_ymin = 0.46
+        self.box_ymax = 0.74
 
         # Left Click Parameters: Closed-Fist Index-Thumb Tap
-        self.tap_down_ratio = 0.18
-        self.tap_up_ratio = 0.24
+        self.tap_down_ratio = 0.27
+        self.tap_up_ratio = 0.35
         self.tap_state = "UP"  # "UP", "DOWN"
         self.tap_start_time = 0.0
 
         # Right Click Parameters: Index-on-Middle Tap
-        self.right_tap_down_ratio = 0.17
-        self.right_tap_up_ratio = 0.23
+        self.right_tap_down_ratio = 0.26
+        self.right_tap_up_ratio = 0.34
         self.right_click_state = "UP"
         self.right_tap_start_time = 0.0
 
         # Drag Mode: Index-Thumb with 3 Fingers UP
         self.is_dragging = False
-        self.pinch_drag_threshold = 0.22
+        self.pinch_drag_threshold = 0.28
         self.pinch_start_time = 0.0
+
+        # Shaka Activation Gesture (Pinky & Thumb OUT, 3 Middle Fingers Curled)
+        self.shaka_start_time = 0.0
+        self.shaka_triggered = False
+        self.shaka_hold_duration = 0.35
 
         # Multi-Click / Double-Click tracking
         self.double_click_window = 0.38
@@ -89,6 +94,8 @@ class GestureEngine:
         self.right_click_state = "UP"
         self.is_dragging = False
         self.pinch_start_time = 0.0
+        self.shaka_start_time = 0.0
+        self.shaka_triggered = False
         self.last_is_locked = False
         self.last_target_desc = None
 
@@ -107,28 +114,40 @@ class GestureEngine:
     def is_fist_closed(self, landmarks, scale: float) -> bool:
         """
         Detects if the middle, ring, and pinky fingers are curled closed into a fist.
-        In a fist, tips are folded down towards the palm (tip.y >= pip.y or dist_to_wrist is small).
+        In a fist, tips are folded down towards the palm/knuckles in 3D.
         """
-        # Middle (12 vs 10), Ring (16 vs 14), Pinky (20 vs 18)
-        m_curled = (landmarks[12].y >= landmarks[10].y - 0.025)
-        r_curled = (landmarks[16].y >= landmarks[14].y - 0.025)
-        p_curled = (landmarks[20].y >= landmarks[18].y - 0.025)
+        # 3D distance from fingertips to their MCP knuckles (9, 13, 17)
+        d_m_mcp = self._dist_3d(landmarks[12], landmarks[9]) / scale
+        d_r_mcp = self._dist_3d(landmarks[16], landmarks[13]) / scale
+        d_p_mcp = self._dist_3d(landmarks[20], landmarks[17]) / scale
 
-        # Distance to wrist in 3D
+        # 3D distance to wrist (0)
         d_m_wrist = self._dist_3d(landmarks[12], landmarks[0]) / scale
         d_r_wrist = self._dist_3d(landmarks[16], landmarks[0]) / scale
         d_p_wrist = self._dist_3d(landmarks[20], landmarks[0]) / scale
 
-        wrist_close = (d_m_wrist < 1.25 and d_r_wrist < 1.25 and d_p_wrist < 1.25)
-        return (m_curled and r_curled and p_curled) or wrist_close
+        m_curled = (d_m_mcp < 0.70) or (d_m_wrist < 1.25) or (landmarks[12].y >= landmarks[10].y - 0.03)
+        r_curled = (d_r_mcp < 0.70) or (d_r_wrist < 1.25) or (landmarks[16].y >= landmarks[14].y - 0.03)
+        p_curled = (d_p_mcp < 0.70) or (d_p_wrist < 1.25) or (landmarks[20].y >= landmarks[18].y - 0.03)
+
+        return m_curled and r_curled and p_curled
 
     def are_last_three_up(self, landmarks) -> bool:
         """
         Detects if the last three fingers (Middle, Ring, Pinky) are extended upright.
         """
-        m_up = landmarks[12].y < landmarks[10].y
-        r_up = landmarks[16].y < landmarks[14].y
-        p_up = landmarks[20].y < landmarks[18].y
+        scale = self._get_hand_scale(landmarks)
+        d_m_mcp = self._dist_3d(landmarks[12], landmarks[9]) / scale
+        d_r_mcp = self._dist_3d(landmarks[16], landmarks[13]) / scale
+        d_p_mcp = self._dist_3d(landmarks[20], landmarks[17]) / scale
+
+        d_m_wrist = self._dist_3d(landmarks[12], landmarks[0]) / scale
+        d_r_wrist = self._dist_3d(landmarks[16], landmarks[0]) / scale
+        d_p_wrist = self._dist_3d(landmarks[20], landmarks[0]) / scale
+
+        m_up = (d_m_mcp > 0.55) or (d_m_wrist > 1.05) or (landmarks[12].y < landmarks[10].y)
+        r_up = (d_r_mcp > 0.55) or (d_r_wrist > 1.05) or (landmarks[16].y < landmarks[14].y)
+        p_up = (d_p_mcp > 0.50) or (d_p_wrist > 0.95) or (landmarks[20].y < landmarks[18].y)
         return m_up and r_up and p_up
 
     def compute_tap_metric(self, landmarks, scale: float) -> Tuple[float, bool]:
@@ -148,6 +167,44 @@ class GestureEngine:
 
     compute_angle_invariant_tap_metric = compute_tap_metric
 
+    def is_shaka_gesture(self, landmarks) -> bool:
+        """
+        Detects the Shaka Activation Gesture (🤙):
+        Thumb (4) and Pinky (20) are fully extended OUT,
+        while Index (8), Middle (12), and Ring (16) are curled IN against the palm.
+        """
+        scale = self._get_hand_scale(landmarks)
+
+        # Thumb (4) and Pinky (20) distance from wrist (0)
+        d_thumb_wrist = self._dist_3d(landmarks[4], landmarks[0]) / scale
+        d_pinky_wrist = self._dist_3d(landmarks[20], landmarks[0]) / scale
+        d_thumb_pinky = self._dist_3d(landmarks[4], landmarks[20]) / scale
+
+        # Index (8), Middle (12), Ring (16) distance from wrist
+        d_index_wrist = self._dist_3d(landmarks[8], landmarks[0]) / scale
+        d_middle_wrist = self._dist_3d(landmarks[12], landmarks[0]) / scale
+        d_ring_wrist = self._dist_3d(landmarks[16], landmarks[0]) / scale
+
+        # Knuckle clearances
+        d_thumb_index_mcp = self._dist_3d(landmarks[4], landmarks[5]) / scale
+        d_pinky_mcp = self._dist_3d(landmarks[20], landmarks[17]) / scale
+
+        thumb_extended = (d_thumb_wrist > 0.95) and (d_thumb_index_mcp > 0.50)
+        pinky_extended = (d_pinky_wrist > 1.05) and (d_pinky_mcp > 0.50)
+
+        index_curled = (landmarks[8].y >= landmarks[6].y - 0.035) or (d_index_wrist < 1.25)
+        middle_curled = (landmarks[12].y >= landmarks[10].y - 0.035) or (d_middle_wrist < 1.25)
+        ring_curled = (landmarks[16].y >= landmarks[14].y - 0.035) or (d_ring_wrist < 1.25)
+
+        return (
+            thumb_extended
+            and pinky_extended
+            and index_curled
+            and middle_curled
+            and ring_curled
+            and (d_thumb_pinky > 1.30)
+        )
+
     def is_super_gesture(self, landmarks) -> bool:
         """
         Detects the 'Super / OK' pose:
@@ -164,6 +221,31 @@ class GestureEngine:
         now = timestamp if timestamp is not None else time.perf_counter()
         scale = self._get_hand_scale(landmarks)
 
+        # 0. Shaka Activation / Toggle Gesture Detection (Pinky & Thumb OUT)
+        shaka_pose_active = self.is_shaka_gesture(landmarks)
+        if shaka_pose_active:
+            if self.shaka_start_time == 0.0:
+                self.shaka_start_time = now
+            elif (now - self.shaka_start_time) >= self.shaka_hold_duration and not self.shaka_triggered:
+                self.is_active = not self.is_active
+                self.shaka_triggered = True
+                if self.on_state_change:
+                    self.on_state_change(self.is_active)
+        else:
+            self.shaka_start_time = 0.0
+            self.shaka_triggered = False
+
+        if not self.is_active:
+            return {
+                "active": False,
+                "shaka_active": shaka_pose_active,
+                "cursor_x": self.last_screen_x,
+                "cursor_y": self.last_screen_y,
+                "action": "STANDBY",
+                "is_locked": False,
+                "target_desc": None,
+            }
+
         # 1. Distances and Pose Classifications
         d_thumb_index = self._dist_3d(landmarks[4], landmarks[8]) / scale
         d_index_middle = self._dist_3d(landmarks[8], landmarks[12]) / scale
@@ -177,20 +259,41 @@ class GestureEngine:
         drag_pose_active = (d_thumb_index < self.pinch_drag_threshold) and three_fingers_up
 
         # Right Click: Index on Middle tap with both extended
-        index_extended = landmarks[8].y < landmarks[6].y
-        middle_extended = landmarks[12].y < landmarks[10].y
+        d_idx_mcp = self._dist_3d(landmarks[8], landmarks[5]) / scale
+        d_mid_mcp = self._dist_3d(landmarks[12], landmarks[9]) / scale
+        index_extended = (d_idx_mcp > 0.52) or (self._dist_3d(landmarks[8], landmarks[0]) / scale > 1.05) or (landmarks[8].y < landmarks[6].y + 0.02)
+        middle_extended = (d_mid_mcp > 0.52) or (self._dist_3d(landmarks[12], landmarks[0]) / scale > 1.05) or (landmarks[12].y < landmarks[10].y + 0.02)
         is_right_contact = (d_index_middle < self.right_tap_down_ratio) and index_extended and middle_extended
 
-        # 2. Cursor Tracking Point: Index Fingertip
-        norm_x = landmarks[8].x
+        # Click Intent / Active Tap Detection:
+        click_intent = (
+            is_left_contact
+            or (self.tap_state == "DOWN")
+            or is_right_contact
+            or (self.right_click_state == "DOWN")
+            or (d_thumb_index < self.tap_up_ratio * 1.35 and fist_closed)
+            or (d_index_middle < self.right_tap_up_ratio * 1.35 and index_extended and middle_extended)
+            or ((now - self.last_click_time) < 0.25)
+        )
+
+        # 2. Cursor Tracking Point: Index Fingertip (Horizontally Mirrored)
+        norm_x = 1.0 - landmarks[8].x
         norm_y = landmarks[8].y
 
         # Camera Tilt Correction
         rot_angle = 0.0
-        if self.mount_mode == "left":
-            rot_angle = math.radians(24.0)
-        elif self.mount_mode == "right":
+        if self.mount_mode == "auto":
+            dx_hand = (1.0 - landmarks[9].x) - (1.0 - landmarks[0].x)
+            dy_hand = landmarks[9].y - landmarks[0].y
+            if dy_hand < -0.05:
+                tilt_deg = math.degrees(math.atan2(dx_hand, -dy_hand))
+                self.detected_tilt_angle = tilt_deg
+                if abs(tilt_deg) > 12.0:
+                    rot_angle = -math.radians(tilt_deg)
+        elif self.mount_mode == "left":
             rot_angle = math.radians(-24.0)
+        elif self.mount_mode == "right":
+            rot_angle = math.radians(24.0)
 
         if abs(rot_angle) > 1e-4:
             cos_a = math.cos(rot_angle)
@@ -226,7 +329,7 @@ class GestureEngine:
         target_desc = None
         if not self.is_dragging:
             snapped_x, snapped_y, is_locked, target_desc = self.target_lock.apply_magnetic_lock(
-                smooth_x, smooth_y, velocity=velocity, timestamp=now
+                smooth_x, smooth_y, velocity=velocity, timestamp=now, is_clicking=click_intent
             )
         else:
             snapped_x, snapped_y = int(smooth_x), int(smooth_y)
@@ -318,6 +421,7 @@ class GestureEngine:
 
         return {
             "active": True,
+            "shaka_active": shaka_pose_active,
             "cursor_x": current_screen_x,
             "cursor_y": current_screen_y,
             "action": action,
