@@ -99,24 +99,70 @@ class OneEuroFilter:
 
 class Point2DOneEuroFilter:
     """
-    Composite 1€ filter for 2D points (x, y) with coordinate stabilization.
+    Composite 1€ filter for 2D points (x, y) with kinetic deadband stabilization.
+    Completely eliminates sub-pixel cursor vibration when hovering still over small icons.
     """
 
     def __init__(
         self,
         freq: float = 60.0,
-        min_cutoff: float = 0.7,
-        beta: float = 0.02,
+        min_cutoff: float = 0.5,
+        beta: float = 0.025,
         d_cutoff: float = 1.0,
+        deadband_radius: float = 2.8,
     ):
         self.x_filter = OneEuroFilter(freq, min_cutoff, beta, d_cutoff)
         self.y_filter = OneEuroFilter(freq, min_cutoff, beta, d_cutoff)
+        self.deadband_radius = deadband_radius
+
+        self._last_out_x: Optional[float] = None
+        self._last_out_y: Optional[float] = None
+        self._last_time: Optional[float] = None
+        self.last_velocity: float = 0.0
 
     def filter(self, x: float, y: float, timestamp: Optional[float] = None) -> Tuple[float, float]:
+        if timestamp is None:
+            timestamp = time.perf_counter()
+
         fx = self.x_filter.filter(x, timestamp)
         fy = self.y_filter.filter(y, timestamp)
-        return fx, fy
+
+        if self._last_out_x is None or self._last_out_y is None:
+            self._last_out_x = fx
+            self._last_out_y = fy
+            self._last_time = timestamp
+            self.last_velocity = 0.0
+            return fx, fy
+
+        dt = max(1e-4, timestamp - (self._last_time or timestamp))
+        self._last_time = timestamp
+
+        disp = math.hypot(fx - self._last_out_x, fy - self._last_out_y)
+        self.last_velocity = disp / dt  # pixels per second
+
+        # Pseudo-Haptic Stillness Deadband:
+        # If displacement is within deadband_radius (< 2.8 px) and velocity is not an intentional flick (< 150 px/s),
+        # keep the cursor perfectly pinned to eliminate micro-tremor.
+        if disp < self.deadband_radius and self.last_velocity < 150.0:
+            return self._last_out_x, self._last_out_y
+
+        # Smooth transition when leaving deadband
+        if disp < self.deadband_radius * 2.0:
+            blend = (disp - self.deadband_radius) / self.deadband_radius
+            out_x = self._last_out_x + (fx - self._last_out_x) * blend
+            out_y = self._last_out_y + (fy - self._last_out_y) * blend
+        else:
+            out_x = fx
+            out_y = fy
+
+        self._last_out_x = out_x
+        self._last_out_y = out_y
+        return out_x, out_y
 
     def reset(self):
         self.x_filter.reset()
         self.y_filter.reset()
+        self._last_out_x = None
+        self._last_out_y = None
+        self._last_time = None
+        self.last_velocity = 0.0

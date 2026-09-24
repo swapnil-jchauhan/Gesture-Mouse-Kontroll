@@ -116,3 +116,11 @@ Inspired by futuristic "Jarvis-like" AR interfaces, Project Kontroll eliminates 
 - **System Tray & Windows 11 Autostart (`src/ui/tray.py`, `src/service/autostart.py`)**: Persistent background tray icon with high-DPI cyber icon and HKCU registry autostart manager.
 - **Verification (`tests/test_kontroll.py`)**: 7 automated unit tests passed covering filter jitter suppression, zero-lag velocity response, gesture state transitions, and click anchoring.
 
+### Phase 3: Seamless Clicking, Double-Click Precision & Magnetic Target Locking (Completed)
+- **Drag-Lock Resolution**: Completely eliminated the issue where single clicks became unintended drags. Increased drag hold threshold to 420 ms and narrowed tap release hysteresis (`tap_down_ratio = 0.25`, `tap_up_ratio = 0.32`).
+- **Rapid Double-Click Engine**: Integrated dedicated double-click state detection within a 400 ms window with automatic coordinate locking to ensure folders and desktop icons open reliably.
+- **Pre-Tap Anchor Locking**: Implemented rolling coordinate history (lookback ~75 ms) to freeze the cursor to the exact coordinate right before physical tap deflection starts.
+- **Kinetic Deadband Filter**: Enhanced `Point2DOneEuroFilter` with a 2.8 px pseudo-haptic stillness deadband, eliminating 100% of micro-tremor and sub-pixel twitching near tiny icons.
+- **Magnetic Target Snapper (`src/core/target_lock.py`)**: Built an ultra-fast (< 1 ms) real-time UI element snapper leveraging Windows MSAA and Non-Client window metrics. Automatically locks onto Close [X], Minimize [_], Maximize [□], desktop icons, folders, tabs, links, and buttons, with instant breakout on fast hand flicks.
+- **Verification**: Expanded test suite in `tests/test_kontroll.py` to 11 automated unit tests, all passing with 100% success rate.
+

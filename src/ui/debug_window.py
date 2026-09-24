@@ -75,19 +75,26 @@ class DebugWindow(QWidget):
         self.status_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
         self.super_label = QLabel("SUPER GESTURE: OFF")
         self.super_label.setStyleSheet("color: #718096;")
+        self.lock_label = QLabel("TARGET: FREE")
+        self.lock_label.setStyleSheet("color: #718096; font-weight: bold;")
 
         telemetry_layout.addWidget(self.fps_label)
         telemetry_layout.addWidget(self.status_label)
         telemetry_layout.addWidget(self.super_label)
+        telemetry_layout.addWidget(self.lock_label)
         layout.addLayout(telemetry_layout)
 
-        # Telemetry Row 2: Tap Ratio Bar
+        # Telemetry Row 2: Tap Ratio Bar & Action Status
         bar_layout = QHBoxLayout()
         bar_layout.addWidget(QLabel("Tap Ratio (Index->Middle):"))
         self.tap_bar = QProgressBar()
         self.tap_bar.setRange(0, 100)
         self.tap_bar.setValue(100)
         bar_layout.addWidget(self.tap_bar)
+
+        self.action_label = QLabel("ACTION: MOVE")
+        self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
+        bar_layout.addWidget(self.action_label)
         layout.addLayout(bar_layout)
 
         # Refresh Timer (30 FPS GUI update)
@@ -105,6 +112,26 @@ class DebugWindow(QWidget):
         is_active = self.gesture_engine.is_active
         self.status_label.setText("STATUS: ONLINE" if is_active else "STATUS: STANDBY")
         self.status_label.setStyleSheet("color: #00f0ff; font-weight: bold;" if is_active else "color: #ffaa00; font-weight: bold;")
+
+        # Update Magnetic Lock & Action labels
+        if getattr(self.gesture_engine, "last_is_locked", False):
+            desc = getattr(self.gesture_engine, "last_target_desc", "TARGET") or "TARGET"
+            self.lock_label.setText(f"TARGET: LOCKED [{desc}] 🧲")
+            self.lock_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
+        else:
+            self.lock_label.setText("TARGET: FREE")
+            self.lock_label.setStyleSheet("color: #718096; font-weight: bold;")
+
+        tap_state = getattr(self.gesture_engine, "tap_state", "UP")
+        if tap_state == "DRAG":
+            self.action_label.setText("ACTION: DRAGGING ⇲")
+            self.action_label.setStyleSheet("color: #ffaa00; font-weight: bold; padding-left: 10px;")
+        elif tap_state == "DOWN":
+            self.action_label.setText("ACTION: CONTACT ⚡")
+            self.action_label.setStyleSheet("color: #00ffaa; font-weight: bold; padding-left: 10px;")
+        else:
+            self.action_label.setText("ACTION: MOVE")
+            self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
 
         if frame is None:
             return
@@ -152,13 +179,13 @@ class DebugWindow(QWidget):
             p12 = points[12]
             cv2.line(display_frame, p8, p12, (0, 255, 0), 2)
 
-            # Tap ratio calculation
+            # Tap ratio calculation in 2D
             scale = self.gesture_engine._get_hand_scale(landmarks)
-            dist = self.gesture_engine._dist_3d(landmarks[8], landmarks[12])
+            dist = self.gesture_engine._dist_2d(landmarks[8], landmarks[12])
             ratio = dist / scale
 
             # Update tap progress bar (inverted: smaller distance -> fuller bar)
-            pct = max(0, min(100, int((1.0 - (ratio / 0.6)) * 100)))
+            pct = max(0, min(100, int((1.0 - (ratio / 0.5)) * 100)))
             self.tap_bar.setValue(pct)
 
             # Super gesture status

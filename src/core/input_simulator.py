@@ -115,16 +115,23 @@ class MouseSimulator:
             self._is_left_down = False
 
     def click(self):
-        """Perform a single left mouse click."""
-        self.left_down()
-        time.sleep(0.015)
-        self.left_up()
+        """Perform an instantaneous hardware-level left mouse click via SendInput."""
+        inputs = (INPUT * 2)()
+        inputs[0].type = INPUT_MOUSE
+        inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN
+        inputs[1].type = INPUT_MOUSE
+        inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP
+        self.user32.SendInput(2, inputs, ctypes.sizeof(INPUT))
+        self._is_left_down = False
 
     def double_click(self):
-        """Perform a double click."""
-        self.click()
-        time.sleep(0.08)
-        self.click()
+        """Perform a rapid double click without blocking the main event loop."""
+        import threading
+        def _dc():
+            self.click()
+            time.sleep(0.045)
+            self.click()
+        threading.Thread(target=_dc, daemon=True).start()
 
     def right_click(self):
         """Perform a single right mouse click."""

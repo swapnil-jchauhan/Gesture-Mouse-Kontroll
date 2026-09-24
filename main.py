@@ -115,9 +115,11 @@ class KontrollApp:
             # Move mouse cursor
             self.mouse.move_to(cx, cy)
 
-            # Dispatch clicks & drags
+            # Dispatch clicks, double-clicks & drags
             if action == "CLICK":
                 self.mouse.click()
+            elif action == "DOUBLE_CLICK":
+                self.mouse.double_click()
             elif action == "DRAG_START":
                 self.mouse.left_down()
             elif action == "DRAG_RELEASE":
