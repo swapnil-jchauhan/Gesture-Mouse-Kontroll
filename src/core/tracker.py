@@ -1,6 +1,7 @@
 """
-Threaded Camera Capture & MediaPipe Hand Tracking Engine.
-Optimized for low-latency, high FPS, and noisy/low-light webcam robustness via CLAHE pre-processing.
+Threaded Camera Capture & MediaPipe Hand Tracking Engine for Project Kontroll.
+Optimized for low-latency (model_complexity=0), MJPEG hardware stream,
+and adaptive low-light contrast enhancement.
 """
 
 import threading
@@ -39,17 +40,18 @@ class HandTracker:
         self.enhance_low_light = enhance_low_light
 
         # OpenCV CLAHE for low-light noise resilience
-        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        self.clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(8, 8))
 
-        # MediaPipe Hands pipeline
+        # MediaPipe Hands pipeline:
+        # Use model_complexity=0 for ultra-fast inference (8-10ms vs 35-50ms)
         self.hands_detector = None
         if mp_hands:
             self.hands_detector = mp_hands.Hands(
                 static_image_mode=False,
                 max_num_hands=1,
-                min_detection_confidence=0.65,
-                min_tracking_confidence=0.65,
-                model_complexity=1,
+                min_detection_confidence=0.60,
+                min_tracking_confidence=0.60,
+                model_complexity=0,
             )
 
         # Threading & Shared State
@@ -63,6 +65,7 @@ class HandTracker:
         self.latest_frame = None
         self.latest_timestamp = 0.0
         self.fps_metric = 0.0
+        self.inference_time_ms = 0.0
         self.has_hand = False
 
     def start(self):
@@ -76,10 +79,16 @@ class HandTracker:
             # Fallback to default backend
             self._cap = cv2.VideoCapture(self.camera_index)
 
+        # Enable MJPG stream to unlock full hardware FPS without USB saturation
+        try:
+            self._cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        except Exception:
+            pass
+
         self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         self._cap.set(cv2.CAP_PROP_FPS, self.target_fps)
-        # Set buffer size to 1 to eliminate video queue lag
+        # Set buffer size to 1 to eliminate video queue latency
         self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         self._running = True
@@ -96,10 +105,16 @@ class HandTracker:
             self._cap = None
 
     def _enhance_frame(self, bgr_frame: np.ndarray) -> np.ndarray:
-        """Applies CLAHE on luminance channel to rescue hand landmarks in dark rooms."""
+        """Applies CLAHE on luminance only if the scene is noticeably dark (< 75 mean brightness)."""
         if not self.enhance_low_light:
             return bgr_frame
         try:
+            # Check fast mean brightness
+            mean_b = np.mean(bgr_frame[::8, ::8, 0])
+            if mean_b > 75.0:
+                # Room is sufficiently lit; skip heavy color conversion
+                return bgr_frame
+
             lab = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2LAB)
             l, a, b = cv2.split(lab)
             l = self.clahe.apply(l)
@@ -110,9 +125,8 @@ class HandTracker:
 
     def _worker_loop(self):
         """Continuously pulls frames, extracts landmarks, and updates state."""
-        prev_time = time.perf_counter()
         frame_count = 0
-        fps_timer = prev_time
+        fps_timer = time.perf_counter()
 
         while self._running:
             if not self._cap or not self._cap.isOpened():
@@ -121,12 +135,12 @@ class HandTracker:
 
             success, frame = self._cap.read()
             if not success or frame is None:
-                time.sleep(0.01)
+                time.sleep(0.005)
                 continue
 
             now = time.perf_counter()
             frame_count += 1
-            if now - fps_timer >= 1.0:
+            if now - fps_timer >= 0.5:
                 self.fps_metric = frame_count / (now - fps_timer)
                 frame_count = 0
                 fps_timer = now
@@ -141,12 +155,14 @@ class HandTracker:
             landmarks = None
             hand_detected = False
 
+            t_inf_start = time.perf_counter()
             if self.hands_detector:
                 results = self.hands_detector.process(rgb)
                 if results.multi_hand_landmarks:
                     hand_detected = True
                     # Grab primary tracked hand
                     landmarks = results.multi_hand_landmarks[0].landmark
+            self.inference_time_ms = (time.perf_counter() - t_inf_start) * 1000.0
 
             # Thread-safe state update
             with self._lock:
@@ -155,9 +171,8 @@ class HandTracker:
                 self.latest_timestamp = now
                 self.has_hand = hand_detected
 
-            # Slight sleep if no hand in frame to save CPU
-            if not hand_detected:
-                time.sleep(0.005)
+            # Small yield to prevent thread starvation
+            time.sleep(0.001)
 
     def get_latest_data(self) -> Tuple[Optional[Any], Optional[np.ndarray], float, bool, float]:
         """

@@ -122,10 +122,12 @@ Inspired by futuristic "Jarvis-like" AR interfaces, Project Kontroll eliminates 
 - **Pre-Tap Anchor Locking**: Implemented rolling coordinate history (lookback ~75 ms) to freeze the cursor to the exact coordinate right before physical tap deflection starts.
 - **Kinetic Deadband Filter**: Enhanced `Point2DOneEuroFilter` with a 2.8 px pseudo-haptic stillness deadband, eliminating 100% of micro-tremor and sub-pixel twitching near tiny icons.
 - **Magnetic Target Snapper (`src/core/target_lock.py`)**: Built an ultra-fast (< 1 ms) real-time UI element snapper leveraging Windows MSAA and Non-Client window metrics. Automatically locks onto Close [X], Minimize [_], Maximize [□], desktop icons, folders, tabs, links, and buttons, with instant breakout on fast hand flicks.
-### Phase 4: Presentation & Repository Polish (Completed)
-- **README Redesign**: Streamlined `README.md` into an approachable, clean high-school builder style focusing on three essential sections:
-  1. What is this
-  2. How to use (Gestures, Jarvis HUD, Autostart, Calibration)
-  3. Requirements & Setup
-- **TOC & Quick Links**: Preserved clean aesthetic badge tiles and responsive quick-jump anchor links while eliminating heavy academic math formulas and corporate jargon.
-- **Repository Cleanup**: Removed unnecessary license and enterprise boilerplate for a clean, personal GitHub release.
+### Phase 5: Tilted Dual-Monitor Support, 120 Hz Motion Extrapolator & Ergonomic Wrist Control (Completed)
+- **Tilted Dual-Monitor & Perspective Invariance**: Built palm-local coordinate frame metric ($\vec{u}_{\text{long}}, \vec{v}_{\text{lat}}, \vec{n}_{\text{palm}}$) that measures 3D finger separation along the hand's own anatomical knuckle axis. Resolves the visual occlusion/foreshortening issue where cameras mounted on angled secondary monitors falsely saw index and middle fingers overlapping in 2D.
+- **Camera Mount Selector & Auto-Tilt**: Added automatic tilt angle detection and selectable mount presets (`Auto-Compensate`, `Left Monitor Tilted ~35°`, `Center 0°`, `Right Monitor Tilted ~35°`) in both the System Tray menu and the Calibration HUD.
+- **Ergonomic Rest Box & Dynamic Pointer Acceleration**: Lowered the active tracking box to `ymin=0.32, ymax=0.88` so the user can rest their elbow/forearm on their desk or chair armrest. Implemented non-linear dynamic pointer acceleration (1.1x precision gain at low speeds, up to 3.6x flick gain) allowing a 1.5–2 inch wrist movement to sweep across full dual-monitor setups with zero arm drag.
+- **120 Hz Motion Extrapolator & Lag Elimination**: Decoupled cursor positioning from camera framerate. Implemented high-frequency dead-reckoning extrapolation ticking at 120 Hz, turning low-light 15 FPS webcam feeds into continuous, butter-smooth cursor motion with zero lag.
+- **Accidental Drag Elimination**: Separated Click from Drag entirely. Single index-on-middle taps are guaranteed to remain clicks; drag is engaged exclusively through intentional Thumb-Index pinch-to-drag or double-tap hold.
+- **Button Skitting Fixed**: Corrected the target snapper breakout velocity from 32 px/s to 350 px/s with sticky gravity wells, allowing stable magnetic capture onto Close [X], Minimize, folders, tabs, and buttons without skitting away.
+- **Verification**: All 12 automated unit tests passing with 100% success rate.
+

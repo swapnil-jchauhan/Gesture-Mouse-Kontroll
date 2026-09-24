@@ -54,13 +54,14 @@ It's a lightweight software for Windows 11 that:
 
 | Gesture | What to do | What happens |
 | :--- | :--- | :--- |
-| **Move Cursor** | Point or hold your hand up in front of the camera | Moves the cursor smoothly across your screen |
-| **Left Click** | Lightly tap your **Index fingertip on your Middle fingertip** | Instant left click! (Zero mouse drift) |
+| **Move Cursor** | Point or move your hand comfortably (elbow on desk!) | Pointer acceleration lets a 2-inch wrist flick reach screen edges! |
+| **Left Click** | Lightly tap your **Index fingertip on your Middle fingertip** | Instant left click! (Zero mouse drift, never accidentally drags) |
 | **Double Click** | Tap index on middle twice quickly | Opens folders, apps, or selects words |
-| **Drag & Select** | Tap index on middle and **hold them together** | Drags windows or highlights text (release to drop) |
+| **Drag & Select** | Pinch **Thumb & Index tips together** | Locks drag to move windows or highlight text (release to drop) |
 | **Jarvis Toggle** | **👌 "Super" gesture**: Thumb + Index touch, **last 3 fingers straight up** | Toggles tracking **ON / OFF** & summons the glowing HUD! |
 
-> **Why tap index on middle?** Normal apps make you pinch thumb + index, which pulls your hand down and moves the cursor off target. Tapping index against middle keeps your hand stable so your click lands on the exact pixel you aimed at!
+> **Tilted Dual-Monitor Setup?** Kontroll automatically calculates your hand's 3D knuckle orientation, so it works even if your webcam is on a tilted side monitor! You can also pick your setup in the Tray Menu (*Left Monitor*, *Center*, *Right*).
+> **No Arm Fatigue:** You don't need to wave your whole arm around. Rest your elbow on your desk, and relaxed finger/wrist twitches move the cursor across the entire screen!
 
 ---
 

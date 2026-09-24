@@ -1,12 +1,12 @@
 """
 Windows System Tray Controller for Project Kontroll.
 Uses PyQt6 QSystemTrayIcon for seamless integration with Windows 11 notification area.
-Provides autostart toggling, calibration launch, and status monitoring.
+Provides autostart toggling, calibration launch, camera angle mode, and status monitoring.
 """
 
 from typing import Optional, Callable
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush
+from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor, QPen, QBrush, QActionGroup
 from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
 
 from src.service.autostart import is_autostart_enabled, enable_autostart, disable_autostart
@@ -55,10 +55,12 @@ class SystemTrayManager:
         on_toggle_active: Callable[[], None],
         on_open_calibration: Callable[[], None],
         on_exit: Callable[[], None],
+        on_mount_mode_change: Optional[Callable[[str], None]] = None,
     ):
         self.on_toggle_active = on_toggle_active
         self.on_open_calibration = on_open_calibration
         self.on_exit = on_exit
+        self.on_mount_mode_change = on_mount_mode_change
 
         self.tray_icon = QSystemTrayIcon()
         self.is_active = True
@@ -109,6 +111,33 @@ class SystemTrayManager:
 
         self.menu.addSeparator()
 
+        # Camera Mounting Angle Submenu
+        self.mount_menu = self.menu.addMenu("Webcam Mounting Angle")
+        self.mount_group = QActionGroup(self.mount_menu)
+
+        act_auto = self.mount_menu.addAction("Auto-Compensate Angle (Recommended)")
+        act_auto.setCheckable(True)
+        act_auto.setChecked(True)
+        self.mount_group.addAction(act_auto)
+        act_auto.triggered.connect(lambda: self._set_mount_mode("auto"))
+
+        act_left = self.mount_menu.addAction("Left Monitor (Tilted ~35°)")
+        act_left.setCheckable(True)
+        self.mount_group.addAction(act_left)
+        act_left.triggered.connect(lambda: self._set_mount_mode("left"))
+
+        act_center = self.mount_menu.addAction("Center Monitor (0° Straight)")
+        act_center.setCheckable(True)
+        self.mount_group.addAction(act_center)
+        act_center.triggered.connect(lambda: self._set_mount_mode("center"))
+
+        act_right = self.mount_menu.addAction("Right Monitor (Tilted ~35°)")
+        act_right.setCheckable(True)
+        self.mount_group.addAction(act_right)
+        act_right.triggered.connect(lambda: self._set_mount_mode("right"))
+
+        self.menu.addSeparator()
+
         # Run on Startup Toggle
         self.startup_action = self.menu.addAction("Run on Windows Startup")
         self.startup_action.setCheckable(True)
@@ -122,6 +151,10 @@ class SystemTrayManager:
         self.exit_action.triggered.connect(self.on_exit)
 
         self.tray_icon.setContextMenu(self.menu)
+
+    def _set_mount_mode(self, mode: str):
+        if self.on_mount_mode_change:
+            self.on_mount_mode_change(mode)
 
     def _toggle_autostart(self, checked: bool):
         if checked:

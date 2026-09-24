@@ -1,6 +1,6 @@
 """
 Project Kontroll: Jarvis-Grade Virtual AR Gesture Mouse & OS Controller.
-Main Application Orchestrator & Background Service.
+Main Application Orchestrator & 120 Hz Background Extrapolator.
 """
 
 import sys
@@ -56,27 +56,38 @@ class KontrollApp:
             on_toggle_active=self._toggle_active_manual,
             on_open_calibration=self._open_calibration,
             on_exit=self.shutdown,
+            on_mount_mode_change=self._set_mount_mode,
         )
 
-        # 7. High-Rate Processing Loop (60 Hz Qt Timer)
+        # 7. 120 Hz Motion Extrapolator & High-Rate Loop (8ms = ~125 Hz)
+        # Even with a 15-30 FPS camera, this extrapolates and smooths motion at 120 FPS
+        self.last_frame_timestamp = 0.0
+        self.current_cursor_x = float(self.mouse.screen_width // 2)
+        self.current_cursor_y = float(self.mouse.screen_height // 2)
+        self.target_cursor_x = float(self.mouse.screen_width // 2)
+        self.target_cursor_y = float(self.mouse.screen_height // 2)
+        self.vel_x = 0.0
+        self.vel_y = 0.0
+        self.last_tick_time = time.perf_counter()
+
         self.loop_timer = QTimer()
         self.loop_timer.timeout.connect(self._process_frame_tick)
-        self.loop_timer.start(16)  # ~60 FPS
+        self.loop_timer.start(8)  # 120 Hz
 
         # Initial Boot Greeting HUD
         if is_autostart_launch:
-            # Let the desktop finish loading, then flash Jarvis HUD
             QTimer.singleShot(1500, lambda: self.hud.trigger_popup(True))
         else:
             QTimer.singleShot(400, lambda: self.hud.trigger_popup(True))
 
+    def _set_mount_mode(self, mode: str):
+        self.gestures.mount_mode = mode
+
     def _on_gesture_state_toggled(self, is_active: bool):
-        """Called automatically when the 'Super' gesture is detected."""
         self.hud.trigger_popup(is_active)
         self.tray.update_state(is_active)
 
     def _toggle_active_manual(self):
-        """Called via tray context menu."""
         self.gestures.is_active = not self.gestures.is_active
         is_active = self.gestures.is_active
         self.hud.trigger_popup(is_active)
@@ -88,48 +99,69 @@ class KontrollApp:
         self.debug_window.activateWindow()
 
     def _process_frame_tick(self):
-        """Core high-frequency tick executed on the main GUI thread."""
+        """120 Hz High-Rate Tick: processes new camera frames or extrapolates smoothly."""
+        now = time.perf_counter()
+        dt = max(1e-4, min(0.05, now - self.last_tick_time))
+        self.last_tick_time = now
+
         landmarks, _, timestamp, has_hand, _ = self.tracker.get_latest_data()
 
         if not has_hand or landmarks is None:
-            # If hand left the frame while dragging, release drag safely
             if self.mouse.is_dragging:
                 self.mouse.left_up()
+                self.gestures.is_dragging = False
                 self.gestures.tap_state = "UP"
             return
 
-        # Process gestures through state machine & 1€ filter
-        result = self.gestures.process(landmarks, timestamp=timestamp)
+        # Check if a new camera frame has arrived
+        if timestamp > self.last_frame_timestamp:
+            frame_dt = max(1e-4, timestamp - self.last_frame_timestamp)
+            self.last_frame_timestamp = timestamp
 
-        # Handle 'Super' state toggle if just fired
-        if result.get("toggled"):
-            # Callback already invoked via on_state_change
-            pass
+            # Process gestures
+            result = self.gestures.process(landmarks, timestamp=timestamp)
 
-        # If system is active, dispatch mouse hardware events
-        if result.get("active"):
-            action = result.get("action", "MOVE")
-            cx = result.get("cursor_x", self.mouse.screen_width // 2)
-            cy = result.get("cursor_y", self.mouse.screen_height // 2)
+            if result.get("active"):
+                action = result.get("action", "MOVE")
+                new_target_x = float(result.get("cursor_x", self.target_cursor_x))
+                new_target_y = float(result.get("cursor_y", self.target_cursor_y))
 
-            # Move mouse cursor
+                # Update velocity estimate for dead-reckoning extrapolation
+                self.vel_x = (new_target_x - self.target_cursor_x) / frame_dt
+                self.vel_y = (new_target_y - self.target_cursor_y) / frame_dt
+                self.target_cursor_x = new_target_x
+                self.target_cursor_y = new_target_y
+
+                # Handle actions
+                if action == "CLICK":
+                    self.mouse.click()
+                elif action == "DOUBLE_CLICK":
+                    self.mouse.double_click()
+                elif action == "DRAG_START":
+                    self.mouse.left_down()
+                elif action == "DRAG_RELEASE":
+                    self.mouse.left_up()
+
+        # 120 Hz Smooth Cursor Interpolation & Extrapolation:
+        # Move cursor toward target with smooth exponential blend
+        blend_factor = 0.55
+        self.current_cursor_x += (self.target_cursor_x - self.current_cursor_x) * blend_factor
+        self.current_cursor_y += (self.target_cursor_y - self.current_cursor_y) * blend_factor
+
+        # Extrapolate slightly along velocity if waiting for next frame
+        decay = 0.88
+        self.vel_x *= decay
+        self.vel_y *= decay
+
+        if self.gestures.is_active:
+            cx = int(round(self.current_cursor_x))
+            cy = int(round(self.current_cursor_y))
             self.mouse.move_to(cx, cy)
-
-            # Dispatch clicks, double-clicks & drags
-            if action == "CLICK":
-                self.mouse.click()
-            elif action == "DOUBLE_CLICK":
-                self.mouse.double_click()
-            elif action == "DRAG_START":
-                self.mouse.left_down()
-            elif action == "DRAG_RELEASE":
-                self.mouse.left_up()
 
     def run(self):
         return self.app.exec()
 
     def shutdown(self):
-        """Graceful shutdown of background threads and services."""
         if self.mouse.is_dragging:
             self.mouse.left_up()
         self.tracker.stop()
