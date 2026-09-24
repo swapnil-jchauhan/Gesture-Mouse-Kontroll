@@ -122,5 +122,10 @@ Inspired by futuristic "Jarvis-like" AR interfaces, Project Kontroll eliminates 
 - **Pre-Tap Anchor Locking**: Implemented rolling coordinate history (lookback ~75 ms) to freeze the cursor to the exact coordinate right before physical tap deflection starts.
 - **Kinetic Deadband Filter**: Enhanced `Point2DOneEuroFilter` with a 2.8 px pseudo-haptic stillness deadband, eliminating 100% of micro-tremor and sub-pixel twitching near tiny icons.
 - **Magnetic Target Snapper (`src/core/target_lock.py`)**: Built an ultra-fast (< 1 ms) real-time UI element snapper leveraging Windows MSAA and Non-Client window metrics. Automatically locks onto Close [X], Minimize [_], Maximize [□], desktop icons, folders, tabs, links, and buttons, with instant breakout on fast hand flicks.
-- **Verification**: Expanded test suite in `tests/test_kontroll.py` to 11 automated unit tests, all passing with 100% success rate.
-
+### Phase 4: Presentation & Repository Polish (Completed)
+- **README Redesign**: Streamlined `README.md` into an approachable, clean high-school builder style focusing on three essential sections:
+  1. What is this
+  2. How to use (Gestures, Jarvis HUD, Autostart, Calibration)
+  3. Requirements & Setup
+- **TOC & Quick Links**: Preserved clean aesthetic badge tiles and responsive quick-jump anchor links while eliminating heavy academic math formulas and corporate jargon.
+- **Repository Cleanup**: Removed unnecessary license and enterprise boilerplate for a clean, personal GitHub release.
