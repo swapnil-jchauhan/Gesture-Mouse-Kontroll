@@ -1,8 +1,8 @@
 <div align="center">
 
-# ⚡ Project Kontroll
+#  Project Kontroll
 
-### *Control your Windows 11 PC with hand gestures like Jarvis — using literally any webcam.*
+### *Control your Windows PC with hand gestures like Jarvis using literally any webcam, even the trashiest ones.*
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2011-0078D4?style=for-the-badge&logo=windows11&logoColor=white)](https://microsoft.com)
@@ -10,13 +10,13 @@
 
 <br/>
 
-> **Move your cursor with your finger, tap index on middle to click, and throw up the "super" gesture (👌) to trigger an insane glowing Jarvis holographic HUD!**
+> **Move your cursor with your finger, tap index on middle to click, and throw up the shaka / calling sign (🤙) to trigger an insane glowing Jarvis holographic HUD!**
 
 </div>
 
 ---
 
-## 📌 Quick Links
+##  Quick Links
 
 - [1. What is this?](#1-what-is-this)
 - [2. How to use](#2-how-to-use)
@@ -50,7 +50,7 @@ It's a lightweight software for Windows 11 that:
 
 ## 2. How to use
 
-### ✋ The Gestures
+###  The Gestures
 
 | Gesture | What to do | What happens |
 | :--- | :--- | :--- |
@@ -58,14 +58,14 @@ It's a lightweight software for Windows 11 that:
 | **Left Click** | Lightly tap your **Index fingertip on your Middle fingertip** | Instant left click! (Zero mouse drift, never accidentally drags) |
 | **Double Click** | Tap index on middle twice quickly | Opens folders, apps, or selects words |
 | **Drag & Select** | Pinch **Thumb & Index tips together** | Locks drag to move windows or highlight text (release to drop) |
-| **Jarvis Toggle** | **👌 "Super" gesture**: Thumb + Index touch, **last 3 fingers straight up** | Toggles tracking **ON / OFF** & summons the glowing HUD! |
+| **Jarvis Toggle** | **🤙 "Shaka" gesture**: **Thumb + Pinky out** | Toggles tracking **ON / OFF** & summons the glowing HUD! |
 
 > **Tilted Dual-Monitor Setup?** Kontroll automatically calculates your hand's 3D knuckle orientation, so it works even if your webcam is on a tilted side monitor! You can also pick your setup in the Tray Menu (*Left Monitor*, *Center*, *Right*).
 > **No Arm Fatigue:** You don't need to wave your whole arm around. Rest your elbow on your desk, and relaxed finger/wrist twitches move the cursor across the entire screen!
 
 ---
 
-### 🔮 The Jarvis HUD
+###  The Jarvis HUD
 
 Whenever you flash the **Super Gesture (👌)**:
 - A glowing holographic neon-cyan HUD reticle pops up at the top of your screen.
@@ -75,7 +75,7 @@ Whenever you flash the **Super Gesture (👌)**:
 
 ---
 
-### 🚀 Auto-Launch on Boot
+###  Auto-Launch on Boot
 
 Want it to be ready as soon as you turn on your PC?
 1. Look at your Windows taskbar system tray (bottom-right corner).
@@ -85,7 +85,7 @@ Want it to be ready as soon as you turn on your PC?
 
 ---
 
-### 🎯 Calibration Mode
+###  Calibration Mode
 
 Want to see what your camera sees and check your hand skeleton?
 Run:
