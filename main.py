@@ -109,28 +109,25 @@ class KontrollApp:
         if not has_hand or landmarks is None:
             if self.mouse.is_dragging:
                 self.mouse.left_up()
-                self.gestures.is_dragging = False
-                self.gestures.tap_state = "UP"
+            self.gestures.reset_hand_state()
             return
 
-        # Check if a new camera frame has arrived
+        # Process new camera frame
         if timestamp > self.last_frame_timestamp:
-            frame_dt = max(1e-4, timestamp - self.last_frame_timestamp)
             self.last_frame_timestamp = timestamp
 
-            # Process gestures
+            # Process gestures (outputs adaptive 1€ filtered coordinates)
             result = self.gestures.process(landmarks, timestamp=timestamp)
 
             if result.get("active"):
                 action = result.get("action", "MOVE")
-                new_target_x = float(result.get("cursor_x", self.target_cursor_x))
-                new_target_y = float(result.get("cursor_y", self.target_cursor_y))
+                target_x = int(result.get("cursor_x", self.target_cursor_x))
+                target_y = int(result.get("cursor_y", self.target_cursor_y))
+                self.target_cursor_x = float(target_x)
+                self.target_cursor_y = float(target_y)
 
-                # Update velocity estimate for dead-reckoning extrapolation
-                self.vel_x = (new_target_x - self.target_cursor_x) / frame_dt
-                self.vel_y = (new_target_y - self.target_cursor_y) / frame_dt
-                self.target_cursor_x = new_target_x
-                self.target_cursor_y = new_target_y
+                # Direct zero-lag hardware dispatch
+                self.mouse.move_to(target_x, target_y)
 
                 # Handle actions
                 if action == "CLICK":
@@ -141,22 +138,6 @@ class KontrollApp:
                     self.mouse.left_down()
                 elif action == "DRAG_RELEASE":
                     self.mouse.left_up()
-
-        # 120 Hz Smooth Cursor Interpolation & Extrapolation:
-        # Move cursor toward target with smooth exponential blend
-        blend_factor = 0.55
-        self.current_cursor_x += (self.target_cursor_x - self.current_cursor_x) * blend_factor
-        self.current_cursor_y += (self.target_cursor_y - self.current_cursor_y) * blend_factor
-
-        # Extrapolate slightly along velocity if waiting for next frame
-        decay = 0.88
-        self.vel_x *= decay
-        self.vel_y *= decay
-
-        if self.gestures.is_active:
-            cx = int(round(self.current_cursor_x))
-            cy = int(round(self.current_cursor_y))
-            self.mouse.move_to(cx, cy)
 
     def run(self):
         return self.app.exec()

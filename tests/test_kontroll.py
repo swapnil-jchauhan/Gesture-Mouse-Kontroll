@@ -72,7 +72,7 @@ class TestOneEuroFilter(unittest.TestCase):
 
 
 class TestGestureEngine(unittest.TestCase):
-    def _create_mock_landmarks(self, index_tip_y=0.4, middle_tip_y=0.4, tap_close=False, pinch_drag=False, super_pose=False):
+    def _create_mock_landmarks(self, index_tip_y=0.4, middle_tip_y=0.4, tap_close=False, pinch_drag=False, super_pose=False, middle_curled=False):
         lm = [SimpleNamespace(x=0.5, y=0.8, z=0.0) for _ in range(21)]
         # Wrist = 0
         lm[0] = SimpleNamespace(x=0.5, y=0.8, z=0.0)
@@ -94,6 +94,10 @@ class TestGestureEngine(unittest.TestCase):
         lm[10] = SimpleNamespace(x=0.50, y=0.52, z=0.0)
         lm[12] = SimpleNamespace(x=0.50, y=middle_tip_y, z=0.0)
 
+        if middle_curled:
+            # Middle finger curled into palm (tip y > pip y)
+            lm[12] = SimpleNamespace(x=0.50, y=0.62, z=0.0)
+
         # Ring & Pinky
         lm[14] = SimpleNamespace(x=0.54, y=0.54, z=0.0)
         lm[16] = SimpleNamespace(x=0.54, y=0.58, z=0.0)
@@ -101,8 +105,9 @@ class TestGestureEngine(unittest.TestCase):
         lm[20] = SimpleNamespace(x=0.58, y=0.60, z=0.0)
 
         if tap_close:
-            # Index tip touching middle tip (x moves to 0.495)
-            lm[8] = SimpleNamespace(x=0.495, y=middle_tip_y, z=0.0)
+            # Index tip touching middle tip
+            target_y = lm[12].y
+            lm[8] = SimpleNamespace(x=0.495, y=target_y, z=0.0)
 
         if pinch_drag:
             # Thumb tip (4) and Index tip (8) touching
@@ -198,6 +203,46 @@ class TestGestureEngine(unittest.TestCase):
         lm_super = self._create_mock_landmarks(super_pose=True)
         is_detected = engine.is_super_gesture(lm_super)
         self.assertTrue(is_detected)
+
+    def test_pointing_pose_extendedness_gate(self):
+        """Verifies that pointing with index finger alone (middle curled) NEVER registers false click."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080)
+        # Even if tips are close in 2D/3D projection, curled middle disables tap
+        lm_pointing = self._create_mock_landmarks(tap_close=True, middle_curled=True)
+        scale = engine._get_hand_scale(lm_pointing)
+        tap_ratio, is_contact = engine.compute_tap_metric(lm_pointing, scale)
+        self.assertEqual(tap_ratio, 1.0)
+        self.assertFalse(is_contact)
+
+        res = engine.process(lm_pointing, timestamp=1.0)
+        self.assertEqual(res["action"], "MOVE")
+
+    def test_non_freezing_anchor_lock(self):
+        """Anchor lock must release after at most 70ms and not freeze cursor permanently."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080)
+        lm_open = self._create_mock_landmarks(tap_close=False)
+        lm_tap = self._create_mock_landmarks(tap_close=True)
+
+        engine.process(lm_open, timestamp=1.0)
+        r_down = engine.process(lm_tap, timestamp=1.05)
+        self.assertEqual(r_down["action"], "TAP_CONTACT")
+
+        # After 100ms (> 70ms anchor window), cursor must follow hand and anchor must be released
+        lm_tap_moved = self._create_mock_landmarks(tap_close=True, index_tip_y=0.25, middle_tip_y=0.25)
+        r_moved = engine.process(lm_tap_moved, timestamp=1.16)
+        self.assertIsNone(engine.anchor_position)
+
+    def test_reset_hand_state(self):
+        """When hand leaves field of view, reset_hand_state clears all sticky states."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080)
+        lm_tap = self._create_mock_landmarks(tap_close=True)
+        engine.process(lm_tap, timestamp=1.0)
+        self.assertEqual(engine.tap_state, "DOWN")
+
+        engine.reset_hand_state()
+        self.assertEqual(engine.tap_state, "UP")
+        self.assertIsNone(engine.anchor_position)
+        self.assertFalse(engine.is_dragging)
 
 
 class TestTargetLockManager(unittest.TestCase):

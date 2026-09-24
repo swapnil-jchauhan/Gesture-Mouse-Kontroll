@@ -318,8 +318,8 @@ class TargetLockManager:
                 tcx, tcy = self.last_target_center
                 dist = math.hypot(raw_x - tcx, raw_y - tcy)
                 if dist < self.capture_radius * 1.3:
-                    # Maintain lock while hovering near same target
-                    pull = 0.85 if velocity < 120.0 else 0.60
+                    # Maintain gentle assist while hovering near same target
+                    pull = 0.25 if velocity < 120.0 else 0.10
                     snapped_x = raw_x + (tcx - raw_x) * pull
                     snapped_y = raw_y + (tcy - raw_y) * pull
                     return int(snapped_x), int(snapped_y), True, self.last_target_name
@@ -347,17 +347,14 @@ class TargetLockManager:
             self.last_target_role = target["role"]
             self.last_target_name = role_name
 
-            # Dynamic Magnetic Pull Factor:
-            # Stronger pull when velocity is low (standing still over icon)
-            if velocity < 100.0:
-                # Heavy magnetic capture: snap directly to center to eliminate tremor
-                pull = 0.92
-            elif velocity < 250.0:
-                # Moderate assist: guides hand toward center
-                pull = 0.75
+            # Subtle Assistive Magnetic Pull:
+            # Gently guides hand to center without trapping the cursor
+            if velocity < 80.0:
+                pull = 0.35
+            elif velocity < 180.0:
+                pull = 0.20
             else:
-                # Soft assist
-                pull = 0.45
+                pull = 0.08
 
             snapped_x = raw_x + (tcx - raw_x) * pull
             snapped_y = raw_y + (tcy - raw_y) * pull

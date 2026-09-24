@@ -86,6 +86,9 @@ class DebugWindow(QWidget):
             "Center Monitor (0° Straight)",
             "Right Monitor (Tilted ~35°)"
         ])
+        modes = ["auto", "left", "center", "right"]
+        if self.gesture_engine.mount_mode in modes:
+            self.mount_combo.setCurrentIndex(modes.index(self.gesture_engine.mount_mode))
         self.mount_combo.currentIndexChanged.connect(self._on_mount_changed)
         ctrl_layout.addWidget(self.mount_combo)
 
@@ -162,18 +165,27 @@ class DebugWindow(QWidget):
             self.lock_label.setText("TARGET: FREE")
             self.lock_label.setStyleSheet("color: #718096; font-weight: bold;")
 
-        # Action Label
-        is_dragging = getattr(self.gesture_engine, "is_dragging", False)
-        tap_state = getattr(self.gesture_engine, "tap_state", "UP")
-        if is_dragging:
-            self.action_label.setText("ACTION: PINCH DRAGGING ⇲")
-            self.action_label.setStyleSheet("color: #ffaa00; font-weight: bold; padding-left: 10px;")
-        elif tap_state == "DOWN":
-            self.action_label.setText("ACTION: CONTACT ⚡")
-            self.action_label.setStyleSheet("color: #00ffaa; font-weight: bold; padding-left: 10px;")
+        # Action Label & Telemetry
+        if not has_hand or landmarks is None:
+            self.action_label.setText("NO HAND")
+            self.action_label.setStyleSheet("color: #718096; font-style: italic; padding-left: 10px;")
+            self.tap_bar.setValue(0)
+            self.super_label.setText("SUPER GESTURE: OFF")
+            self.super_label.setStyleSheet("color: #718096;")
+            self.lock_label.setText("TARGET: FREE")
+            self.lock_label.setStyleSheet("color: #718096; font-weight: bold;")
         else:
-            self.action_label.setText("ACTION: MOVE")
-            self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
+            is_dragging = getattr(self.gesture_engine, "is_dragging", False)
+            tap_state = getattr(self.gesture_engine, "tap_state", "UP")
+            if is_dragging:
+                self.action_label.setText("ACTION: PINCH DRAGGING ⇲")
+                self.action_label.setStyleSheet("color: #ffaa00; font-weight: bold; padding-left: 10px;")
+            elif tap_state == "DOWN":
+                self.action_label.setText("ACTION: CONTACT ⚡")
+                self.action_label.setStyleSheet("color: #00ffaa; font-weight: bold; padding-left: 10px;")
+            else:
+                self.action_label.setText("ACTION: MOVE")
+                self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
 
         if frame is None:
             return
