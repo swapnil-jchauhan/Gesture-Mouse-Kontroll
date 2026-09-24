@@ -31,14 +31,14 @@
 
 ## 1. What is this?
 
-I always wanted to control my PC without touching a mouse — like Tony Stark interacting with holograms in mid-air. 
+Imagine being able to control ur PC without touching a anything like Tony Stark interacting with holograms in mid-air. 
 
 Every webcam mouse project I found online had the same annoying issues:
 1. **The cursor shakes like crazy** because cheap webcams have noisy sensors.
 2. **You miss your clicks** because when you do a mid-air pinch, your hand shakes and the cursor slides away from the button.
 3. **They lag** or need expensive depth cameras.
 
-So I made **Project Kontroll**! 
+So I made this
 
 It's a lightweight software for Windows 11 that:
 - Uses **any regular webcam** (even cheap potato laptop cameras).
