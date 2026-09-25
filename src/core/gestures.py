@@ -43,14 +43,15 @@ class GestureEngine:
         self.is_active = initial_active
 
         # Pillar 2: 3D Desk Homography Engine
-        self.mount_mode = "auto"
-        self.homography = DeskHomography(mode=self.mount_mode, default_tilt_deg=35.0)
+        self.mount_mode = "center"
+        self.homography = DeskHomography(mode=self.mount_mode, default_tilt_deg=0.0)
 
         # Pillar 4: Relative Ballistics Engine with Air-Clutching
         self.ballistics = RelativeBallisticsEngine(
             screen_width=self.screen_width,
             screen_height=self.screen_height,
             mode="relative",
+            base_sensitivity=1.6,
         )
 
         # 1€ Filter: Adaptive Low-Pass Filter with kinetic deadband
@@ -60,22 +61,23 @@ class GestureEngine:
         self.target_lock = TargetLockManager(capture_radius=42.0, breakout_velocity=750.0, bubble_radius=35.0)
 
         # Ergonomic Rest Box (forearm/elbow resting on desk)
-        self.box_xmin = 0.36
-        self.box_xmax = 0.64
-        self.box_ymin = 0.46
-        self.box_ymax = 0.74
+        self.box_xmin = 0.20
+        self.box_xmax = 0.80
+        self.box_ymin = 0.30
+        self.box_ymax = 0.85
 
         # Left Click Parameters: Closed-Fist Index-Thumb Tap
-        self.tap_down_ratio = 0.27
-        self.tap_up_ratio = 0.35
+        self.tap_down_ratio = 0.32
+        self.tap_up_ratio = 0.40
         self.tap_state = "UP"  # "UP", "DOWN"
         self.tap_start_time = 0.0
 
         # Right Click Parameters: Middle-Thumb Tap (Orthogonal, 0% Ghost Clicks)
         self.right_tap_down_ratio = 0.28
-        self.right_tap_up_ratio = 0.36
+        self.right_tap_up_ratio = 0.38
         self.right_click_state = "UP"  # "UP", "DOWN"
         self.right_tap_start_time = 0.0
+        self._mid_open_timer = 0.0
 
         # Drag Mode: Index-Thumb with 3 Fingers UP (Super Gesture 👌)
         self.is_dragging = False
@@ -126,6 +128,7 @@ class GestureEngine:
         self.last_is_locked = False
         self.last_target_desc = None
         self._prev_norm_pos = None
+        self._mid_open_timer = 0.0
         self.cursor_filter.reset()
 
     @staticmethod
@@ -163,6 +166,11 @@ class GestureEngine:
         Detects if the last three fingers (Middle, Ring, Pinky) are extended upright.
         """
         scale = self._get_hand_scale(landmarks)
+        # If middle finger is touching the thumb, it cannot be extended upright (super gesture impossible)
+        d_thumb_middle = self._dist_3d(landmarks[4], landmarks[12]) / scale
+        if d_thumb_middle < 0.35:
+            return False
+
         d_m_mcp = self._dist_3d(landmarks[12], landmarks[9]) / scale
         d_r_mcp = self._dist_3d(landmarks[16], landmarks[13]) / scale
         d_p_mcp = self._dist_3d(landmarks[20], landmarks[17]) / scale
@@ -181,14 +189,13 @@ class GestureEngine:
         Calculates Left-Click Tap Metric:
         Index fingertip (8) on Thumb fingertip (4) with a CLOSED FIST.
         """
-        fist_closed = self.is_fist_closed(landmarks, scale)
-        if not fist_closed:
-            return 1.0, False
-
         d_index_thumb = self._dist_3d(landmarks[8], landmarks[4])
         tap_ratio = d_index_thumb / scale
-        is_contact = tap_ratio < self.tap_down_ratio
+        fist_closed = self.is_fist_closed(landmarks, scale)
+        if not fist_closed:
+            return tap_ratio, False
 
+        is_contact = tap_ratio < self.tap_down_ratio
         return tap_ratio, is_contact
 
     compute_angle_invariant_tap_metric = compute_tap_metric
@@ -286,22 +293,54 @@ class GestureEngine:
         fist_closed = self.is_fist_closed(landmarks, scale)
         three_fingers_up = self.are_last_three_up(landmarks)
 
-        # Left Click: Closed fist (✊) Index fingertip taps Thumb (Index closer to thumb than middle)
-        is_left_contact = (d_thumb_index < self.tap_down_ratio) and (d_thumb_index < d_thumb_middle) and fist_closed
+        # Check finger extensions
+        d_idx_mcp = self._dist_3d(landmarks[8], landmarks[5]) / scale
+        d_idx_wrist = self._dist_3d(landmarks[8], landmarks[0]) / scale
+        index_extended = (d_idx_mcp > 0.55) or (d_idx_wrist > 1.05) or (landmarks[8].y < landmarks[6].y - 0.02)
+
+        d_mid_mcp = self._dist_3d(landmarks[12], landmarks[9]) / scale
+        d_mid_wrist = self._dist_3d(landmarks[12], landmarks[0]) / scale
+        middle_extended = (d_mid_mcp > 0.55) or (d_mid_wrist > 1.05) or (landmarks[12].y < landmarks[10].y)
+
+        if middle_extended:
+            self._mid_open_timer = now
 
         # Drag: Index on Thumb with Last Three Fingers UP (👌 Super Gesture)
         drag_pose_active = (d_thumb_index < self.pinch_drag_threshold) and three_fingers_up
 
-        # Right Click (Pillar 3 Orthogonal Gesture): Middle fingertip taps Thumb (✊/👌 with middle-thumb contact)
-        # Ring and pinky curled; middle touches thumb. Middle is closer to thumb than index.
-        # Completely immune to collinear line-of-sight occlusion!
+        # Two-Finger Pinch (Index + Middle touching Thumb together) -> Right Click
+        two_finger_pinch = (
+            (d_thumb_index < self.tap_down_ratio * 1.05)
+            and (d_thumb_middle < self.right_tap_down_ratio * 1.05)
+            and not three_fingers_up
+        )
+
+        # Right Click (Pillar 3 Orthogonal Gesture):
+        # 1) Two-Finger Pinch (Index + Middle touch thumb), OR
+        # 2) Middle finger taps thumb actively (was extended recently), OR
+        # 3) Fist closed middle tap (index not extended pointing)
         d_ring_mcp = self._dist_3d(landmarks[16], landmarks[13]) / scale
         d_pinky_mcp = self._dist_3d(landmarks[20], landmarks[17]) / scale
         ring_pinky_curled = (d_ring_mcp < 0.72) and (d_pinky_mcp < 0.72)
-        is_right_contact = (
+
+        middle_active_tap = (
             (d_thumb_middle < self.right_tap_down_ratio)
-            and (d_thumb_middle < d_thumb_index)
-            and (ring_pinky_curled or fist_closed or three_fingers_up)
+            and (
+                two_finger_pinch
+                or (now - self._mid_open_timer < 0.40)
+                or (not index_extended and (ring_pinky_curled or fist_closed))
+            )
+            and not drag_pose_active
+        )
+        is_right_contact = middle_active_tap
+
+        # Left Click: Index fingertip taps Thumb while NOT right click and NOT drag
+        is_left_contact = (
+            (d_thumb_index < self.tap_down_ratio)
+            and not two_finger_pinch
+            and not drag_pose_active
+            and not is_right_contact
+            and (fist_closed or not three_fingers_up)
         )
 
         # Click Intent / Active Tap Detection for Firm Anchor
@@ -310,8 +349,7 @@ class GestureEngine:
             or (self.tap_state == "DOWN")
             or is_right_contact
             or (self.right_click_state == "DOWN")
-            or (d_thumb_index < self.tap_up_ratio * 1.35 and fist_closed)
-            or (d_thumb_middle < self.right_tap_up_ratio * 1.35)
+            or (d_thumb_index < self.tap_up_ratio * 1.2 and fist_closed)
             or ((now - self.last_click_time) < 0.25)
         )
 
@@ -342,11 +380,11 @@ class GestureEngine:
 
         # Motion displacement delta
         if is_left_contact or self.tap_state == "DOWN" or is_right_contact or self.right_click_state == "DOWN":
-            # Pin cursor during active physical tap-down: finger actuation motion is not a mouse swipe
+            # Pin cursor during active physical tap-down and tap-release:
+            # finger actuation motion is not a mouse swipe
             screen_dx = 0.0
             screen_dy = 0.0
         elif optical_flow_delta is not None:
-            # Pillar 1: Sub-pixel optical flow displacement
             if abs(optical_flow_delta[0]) < 1e-6 and abs(optical_flow_delta[1]) < 1e-6:
                 # Laser-mouse stillness guarantee: identically (0.00, 0.00) px displacement
                 screen_dx = 0.0
@@ -356,11 +394,10 @@ class GestureEngine:
                 cam_dx = -optical_flow_delta[0]
                 cam_dy = optical_flow_delta[1]
                 desk_dx, desk_dy = self.homography.transform_vector(cam_dx, cam_dy, landmarks)
-                # Scale to screen pixel space
+                # Scale from camera pixels to screen pixel space
                 screen_dx = desk_dx * (self.screen_width / 640.0)
                 screen_dy = desk_dy * (self.screen_height / 480.0)
         elif self._prev_norm_pos is not None:
-            # Fallback to neural landmarks only when optical flow is unavailable
             raw_dx = (norm_x - self._prev_norm_pos[0]) * float(self.screen_width)
             raw_dy = (norm_y - self._prev_norm_pos[1]) * float(self.screen_height)
             desk_dx, desk_dy = self.homography.transform_vector(raw_dx, raw_dy, landmarks)

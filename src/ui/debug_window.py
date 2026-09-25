@@ -81,12 +81,12 @@ class DebugWindow(QWidget):
         ctrl_layout.addWidget(QLabel("Webcam Mount:"))
         self.mount_combo = QComboBox()
         self.mount_combo.addItems([
-            "Auto Compensate Angle (Recommended)",
-            "Left Monitor (Tilted ~35°)",
             "Center Monitor (0° Straight)",
+            "Auto Compensate Angle",
+            "Left Monitor (Tilted ~35°)",
             "Right Monitor (Tilted ~35°)"
         ])
-        modes = ["auto", "left", "center", "right"]
+        modes = ["center", "auto", "left", "right"]
         if self.gesture_engine.mount_mode in modes:
             self.mount_combo.setCurrentIndex(modes.index(self.gesture_engine.mount_mode))
         self.mount_combo.currentIndexChanged.connect(self._on_mount_changed)
@@ -296,7 +296,8 @@ class DebugWindow(QWidget):
             scale = self.gesture_engine._get_hand_scale(landmarks)
             tap_ratio, _ = self.gesture_engine.compute_tap_metric(landmarks, scale)
 
-            pct = max(0, min(100, int(((0.45 - tap_ratio) / (0.45 - 0.25)) * 100)))
+            threshold = getattr(self.gesture_engine, "tap_down_ratio", 0.32)
+            pct = max(0, min(100, int(((0.45 - tap_ratio) / max(0.01, 0.45 - threshold)) * 100)))
             self.tap_bar.setValue(pct)
 
         # Convert to QPixmap

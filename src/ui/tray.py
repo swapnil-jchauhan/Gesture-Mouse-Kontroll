@@ -140,9 +140,14 @@ class SystemTrayManager:
         self.mount_menu = self.menu.addMenu("Webcam Mounting Angle")
         self.mount_group = QActionGroup(self.mount_menu)
 
-        act_auto = self.mount_menu.addAction("Auto Compensate Angle (Recommended)")
+        act_center = self.mount_menu.addAction("Center Monitor (0° Straight)")
+        act_center.setCheckable(True)
+        act_center.setChecked(True)
+        self.mount_group.addAction(act_center)
+        act_center.triggered.connect(lambda: self._set_mount_mode("center"))
+
+        act_auto = self.mount_menu.addAction("Auto Compensate Angle")
         act_auto.setCheckable(True)
-        act_auto.setChecked(True)
         self.mount_group.addAction(act_auto)
         act_auto.triggered.connect(lambda: self._set_mount_mode("auto"))
 
@@ -150,11 +155,6 @@ class SystemTrayManager:
         act_left.setCheckable(True)
         self.mount_group.addAction(act_left)
         act_left.triggered.connect(lambda: self._set_mount_mode("left"))
-
-        act_center = self.mount_menu.addAction("Center Monitor (0° Straight)")
-        act_center.setCheckable(True)
-        self.mount_group.addAction(act_center)
-        act_center.triggered.connect(lambda: self._set_mount_mode("center"))
 
         act_right = self.mount_menu.addAction("Right Monitor (Tilted ~35°)")
         act_right.setCheckable(True)

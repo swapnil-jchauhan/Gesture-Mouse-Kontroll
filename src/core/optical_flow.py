@@ -174,14 +174,26 @@ class SubPixelOpticalFlowTracker:
                         good_prev.append(p_pt)
 
         if len(good_curr) < 3:
-            # Feature tracking lost or drifted outside ROI: Re-anchor immediately to neural landmark
+            # Feature tracking lost or fast swipe outside 48x48 ROI:
+            # Fall back to neural landmark displacement so fast gestures and flicks never freeze
+            prev_x, prev_y = self.accumulated_pos if self.accumulated_pos else (lx, ly)
+            dx_fallback = lx - prev_x
+            dy_fallback = ly - prev_y
+            disp_fallback = math.hypot(dx_fallback, dy_fallback)
+
             self.prev_pts = self._extract_features_in_roi(gray, (lx, ly))
             self.prev_gray = gray.copy()
             self.accumulated_pos = (lx, ly)
             self.active_features_count = len(self.prev_pts)
-            self.last_displacement = (0.0, 0.0)
-            self.is_still = True
-            return 0.0, 0.0, lx, ly
+
+            if disp_fallback < self.stillness_threshold:
+                self.last_displacement = (0.0, 0.0)
+                self.is_still = True
+                return 0.0, 0.0, lx, ly
+            else:
+                self.last_displacement = (dx_fallback, dy_fallback)
+                self.is_still = False
+                return dx_fallback, dy_fallback, lx, ly
 
         curr_arr = np.array(good_curr, dtype=np.float32)
         prev_arr = np.array(good_prev, dtype=np.float32)

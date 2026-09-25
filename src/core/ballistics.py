@@ -21,7 +21,7 @@ class RelativeBallisticsEngine:
         screen_width: int = 1920,
         screen_height: int = 1080,
         mode: str = "relative",  # 'relative' or 'absolute'
-        base_sensitivity: float = 1.0,
+        base_sensitivity: float = 1.6,
     ):
         self.screen_width = max(1, screen_width)
         self.screen_height = max(1, screen_height)
@@ -108,21 +108,21 @@ class RelativeBallisticsEngine:
     def compute_ballistic_gain(self, velocity: float) -> float:
         """
         Dynamic S-Curve Pointer Acceleration Profile:
-        - Low speeds (< 120 px/s): 0.85x sub-linear gear for pixel-perfect targeting on 10px icons.
-        - Medium speeds (120 - 600 px/s): 1.0x - 2.5x linear cruising gear.
-        - High speeds (> 600 px/s): Exponential boost up to 5.5x for dual-monitor flick with 1-inch wrist motion.
+        - Low speeds (< 100 px/s): 1.0x for pixel-perfect targeting on 10px icons.
+        - Medium speeds (100 - 500 px/s): 1.5x - 3.2x linear cruising gear for natural navigation.
+        - High speeds (> 500 px/s): Exponential boost up to 6.5x for effortless flick with wrist motion.
         """
-        if velocity < 120.0:
-            return 0.85 * self.base_sensitivity
-        elif velocity < 600.0:
+        if velocity < 100.0:
+            return 1.0 * self.base_sensitivity
+        elif velocity < 500.0:
             # Cubic smoothstep S-curve
-            t = (velocity - 120.0) / 480.0
+            t = (velocity - 100.0) / 400.0
             smooth_t = t * t * (3.0 - 2.0 * t)
-            return (0.85 + (2.5 - 0.85) * smooth_t) * self.base_sensitivity
+            return (1.0 + (3.2 - 1.0) * smooth_t) * self.base_sensitivity
         else:
             # Exponential wrist flick boost
-            excess = min(1500.0, velocity - 600.0) / 1500.0
-            boost = 2.5 + 3.0 * (excess ** 1.25)
+            excess = min(1500.0, velocity - 500.0) / 1500.0
+            boost = 3.2 + 3.3 * (excess ** 1.2)
             return boost * self.base_sensitivity
 
     def update(

@@ -279,42 +279,72 @@ class TargetLockManager:
         HTMAXBUTTON = 9
         HTHELP = 21
 
-        if hit not in (HTCLOSE, HTMINBUTTON, HTMAXBUTTON, HTHELP):
-            return None
+        if hit in (HTCLOSE, HTMINBUTTON, HTMAXBUTTON, HTHELP):
+            rect = wintypes.RECT()
+            self.user32.GetWindowRect(hwnd, byref(rect))
 
+            btn_w = 46
+            btn_h = 32
+
+            if hit == HTCLOSE:
+                bx = rect.right - btn_w // 2
+                by = rect.top + btn_h // 2
+                return {
+                    "role": ROLE_SYSTEM_PUSHBUTTON,
+                    "role_name": "CLOSE [X]",
+                    "rect": (rect.right - btn_w, rect.top, btn_w, btn_h),
+                    "center": (float(bx), float(by)),
+                }
+            elif hit == HTMAXBUTTON:
+                bx = rect.right - btn_w - btn_w // 2
+                by = rect.top + btn_h // 2
+                return {
+                    "role": ROLE_SYSTEM_PUSHBUTTON,
+                    "role_name": "MAXIMIZE [□]",
+                    "rect": (rect.right - btn_w * 2, rect.top, btn_w, btn_h),
+                    "center": (float(bx), float(by)),
+                }
+            elif hit == HTMINBUTTON:
+                bx = rect.right - btn_w * 2 - btn_w // 2
+                by = rect.top + btn_h // 2
+                return {
+                    "role": ROLE_SYSTEM_PUSHBUTTON,
+                    "role_name": "MINIMIZE [_]",
+                    "rect": (rect.right - btn_w * 3, rect.top, btn_w, btn_h),
+                    "center": (float(bx), float(by)),
+                }
+
+        # Universal fallback for modern XAML / Windows Terminal / custom-drawn windows
         rect = wintypes.RECT()
-        self.user32.GetWindowRect(hwnd, byref(rect))
-
-        btn_w = 46
-        btn_h = 32
-
-        if hit == HTCLOSE:
-            bx = rect.right - btn_w // 2
-            by = rect.top + btn_h // 2
-            return {
-                "role": ROLE_SYSTEM_PUSHBUTTON,
-                "role_name": "CLOSE [X]",
-                "rect": (rect.right - btn_w, rect.top, btn_w, btn_h),
-                "center": (float(bx), float(by)),
-            }
-        elif hit == HTMAXBUTTON:
-            bx = rect.right - btn_w - btn_w // 2
-            by = rect.top + btn_h // 2
-            return {
-                "role": ROLE_SYSTEM_PUSHBUTTON,
-                "role_name": "MAXIMIZE [□]",
-                "rect": (rect.right - btn_w * 2, rect.top, btn_w, btn_h),
-                "center": (float(bx), float(by)),
-            }
-        elif hit == HTMINBUTTON:
-            bx = rect.right - btn_w * 2 - btn_w // 2
-            by = rect.top + btn_h // 2
-            return {
-                "role": ROLE_SYSTEM_PUSHBUTTON,
-                "role_name": "MINIMIZE [_]",
-                "rect": (rect.right - btn_w * 3, rect.top, btn_w, btn_h),
-                "center": (float(bx), float(by)),
-            }
+        if self.user32.GetWindowRect(hwnd, byref(rect)):
+            win_w = rect.right - rect.left
+            win_h = rect.bottom - rect.top
+            # If window is an application window and cursor is within top caption strip (top 38px)
+            if win_w >= 220 and win_h >= 120 and rect.top <= y <= rect.top + 38:
+                if rect.right - 52 <= x <= rect.right:
+                    # Close [X] button in top right
+                    return {
+                        "role": ROLE_SYSTEM_PUSHBUTTON,
+                        "role_name": "CLOSE [X]",
+                        "rect": (rect.right - 52, rect.top, 52, 36),
+                        "center": (float(rect.right - 26), float(rect.top + 18)),
+                    }
+                elif rect.right - 100 <= x < rect.right - 52:
+                    # Maximize button
+                    return {
+                        "role": ROLE_SYSTEM_PUSHBUTTON,
+                        "role_name": "MAXIMIZE [□]",
+                        "rect": (rect.right - 100, rect.top, 48, 36),
+                        "center": (float(rect.right - 76), float(rect.top + 18)),
+                    }
+                elif rect.right - 148 <= x < rect.right - 100:
+                    # Minimize button
+                    return {
+                        "role": ROLE_SYSTEM_PUSHBUTTON,
+                        "role_name": "MINIMIZE [_]",
+                        "rect": (rect.right - 148, rect.top, 48, 36),
+                        "center": (float(rect.right - 124), float(rect.top + 18)),
+                    }
 
         return None
 
@@ -363,9 +393,9 @@ class TargetLockManager:
             dist = math.hypot(raw_x - tcx, raw_y - tcy)
             max_stick_dist = max(width, height) / 2.0 + 75.0
 
-            # Active Click Anchor: During taps/clicks, hold lock rigidly unless pulled far away (> 120 px)
+            # Active Click Anchor: During taps/clicks, hold lock rigidly unless pulled far away (> 240 px)
             if is_clicking:
-                if dist <= 120.0 or inside_pad:
+                if dist <= 240.0 or inside_pad:
                     self.last_output_pos = (tcx, tcy)
                     return int(round(tcx)), int(round(tcy)), True, self.last_target_name
                 else:

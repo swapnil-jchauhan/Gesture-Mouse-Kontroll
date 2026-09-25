@@ -18,16 +18,16 @@ class DeskHomography:
     into a calibrated horizontal desktop coordinate space.
     """
 
-    def __init__(self, mode: str = "left", default_tilt_deg: float = 35.0, pitch_deg: float = 14.0):
+    def __init__(self, mode: str = "center", default_tilt_deg: float = 35.0, pitch_deg: float = 0.0):
         """
-        :param mode: 'left' (tilted left monitor), 'center' (straight), 'right' (tilted right), 'auto'
+        :param mode: 'center' (straight monitor/laptop), 'left' (tilted left monitor), 'right' (tilted right), 'auto'
         :param default_tilt_deg: Angle in degrees for tilted mounts (standard ~35°).
-        :param pitch_deg: Downward pitch angle of monitor/webcam (standard ~14°).
+        :param pitch_deg: Downward pitch angle of monitor/webcam (standard 0°).
         """
         self.mode = mode
         self.default_tilt_deg = default_tilt_deg
         self.pitch_deg = pitch_deg
-        self.estimated_tilt_deg = default_tilt_deg
+        self.estimated_tilt_deg = 0.0 if mode == "center" else default_tilt_deg
         self._ema_alpha = 0.05
         self._cached_matrix: Optional[np.ndarray] = None
         self._cached_angle: Optional[float] = None
@@ -70,30 +70,32 @@ class DeskHomography:
 
     def estimate_camera_tilt(self, landmarks) -> float:
         """
-        Estimates the camera's tilt angle in degrees based on the 3D knuckle vectors.
+        Estimates the camera's tilt angle in degrees based on 3D hand geometry.
+        Clamped strictly to [-35.0, 35.0] to prevent axis inversion or runaway rotations.
         """
         if landmarks is None or len(landmarks) < 21:
-            return self.default_tilt_deg
-
-        # Knuckle line: Index MCP (5) to Pinky MCP (17) in camera image plane
-        dx = (1.0 - landmarks[17].x) - (1.0 - landmarks[5].x)
-        dy = landmarks[17].y - landmarks[5].y
-
-        # If hand is oriented horizontally across desk, atan2 gives angle
-        deg = math.degrees(math.atan2(dy, dx)) if abs(dx) > 1e-4 else 0.0
+            return 0.0 if self.mode == "center" else self.default_tilt_deg
 
         # Hand palm normal estimation
         normal = self.compute_palm_normal(landmarks)
-        # Normal vector x and z components indicate yaw angle
-        yaw_rad = math.atan2(normal[0], normal[2]) if abs(normal[2]) > 1e-4 else 0.0
+        # MediaPipe camera coordinates: Z points into screen (away from camera).
+        # A palm facing the camera has normal[2] < 0.
+        # Projecting onto the horizontal plane relative to camera view:
+        # atan2(normal[0], -normal[2]) gives 0.0° when facing straight at camera.
+        yaw_rad = math.atan2(normal[0], -normal[2]) if abs(normal[2]) > 1e-4 else 0.0
         yaw_deg = math.degrees(yaw_rad)
 
-        candidate_tilt = yaw_deg if abs(yaw_deg) > 10.0 else deg
+        # Strictly clamp candidate tilt to physically plausible monitor mount angles [-35°, +35°]
+        candidate_tilt = max(-35.0, min(35.0, yaw_deg))
+
         if abs(candidate_tilt) > 4.0:
             self.estimated_tilt_deg = (
                 (1.0 - self._ema_alpha) * self.estimated_tilt_deg + self._ema_alpha * candidate_tilt
             )
-        return self.estimated_tilt_deg
+        else:
+            self.estimated_tilt_deg = (1.0 - self._ema_alpha) * self.estimated_tilt_deg
+
+        return max(-35.0, min(35.0, self.estimated_tilt_deg))
 
     def get_effective_tilt_deg(self, landmarks=None) -> float:
         """Returns the active un-tilting angle in degrees based on current mode."""
@@ -106,7 +108,7 @@ class DeskHomography:
         elif self.mode == "auto":
             if landmarks:
                 self.estimate_camera_tilt(landmarks)
-            return self.estimated_tilt_deg
+            return max(-35.0, min(35.0, self.estimated_tilt_deg))
         return 0.0
 
     def get_homography_matrix(self, mode: Optional[str] = None, landmarks=None) -> np.ndarray:

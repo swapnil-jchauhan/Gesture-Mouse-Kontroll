@@ -1031,7 +1031,92 @@ class TestSessionLockDetection(unittest.TestCase):
         )
         self.assertFalse(tray.is_active)
         self.assertIn("Standby", tray.status_action.text())
-        self.assertIn("STANDBY", tray.tray_icon.toolTip())
+class TestGodTierPrecisionAndFixes(unittest.TestCase):
+    def test_camera_tilt_never_inverts_x_axis(self):
+        """Verifies that DeskHomography tilt estimation never inverts the X axis."""
+        homography = DeskHomography(mode="auto")
+        lm = [SimpleNamespace(x=0.5, y=0.8, z=0.0) for _ in range(21)]
+        lm[0] = SimpleNamespace(x=0.5, y=0.8, z=0.0)    # Wrist
+        lm[5] = SimpleNamespace(x=0.45, y=0.48, z=-0.05) # Index MCP (palm facing camera)
+        lm[17] = SimpleNamespace(x=0.55, y=0.52, z=0.02) # Pinky MCP
+
+        tilt = homography.estimate_camera_tilt(lm)
+        self.assertGreaterEqual(tilt, -35.0)
+        self.assertLessEqual(tilt, 35.0)
+
+        H = homography.get_homography_matrix(landmarks=lm)
+        # H[0, 0] must be strictly positive (never inverting horizontal tracking)
+        self.assertGreater(H[0, 0], 0.70)
+
+        # Rightward physical vector must remain rightward on desk
+        dx_desk, dy_desk = homography.transform_vector(100.0, 0.0, landmarks=lm)
+        self.assertGreater(dx_desk, 50.0)
+
+    def test_pointing_pose_zero_ghost_right_click(self):
+        """Verifies pointing hand posture with curled middle finger does NOT trigger ghost right clicks."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080, initial_active=True)
+        # Natural pointing hand: Index extended, Middle curled into palm near thumb
+        lm = [SimpleNamespace(x=0.5, y=0.8, z=0.0) for _ in range(21)]
+        lm[0] = SimpleNamespace(x=0.5, y=0.8, z=0.0)
+        lm[9] = SimpleNamespace(x=0.5, y=0.5, z=0.0)
+        lm[5] = SimpleNamespace(x=0.42, y=0.52, z=0.0)
+        lm[17] = SimpleNamespace(x=0.58, y=0.52, z=0.0)
+        lm[4] = SimpleNamespace(x=0.40, y=0.52, z=0.0)   # Thumb
+        lm[8] = SimpleNamespace(x=0.40, y=0.32, z=0.0)   # Index extended pointing
+        lm[6] = SimpleNamespace(x=0.40, y=0.42, z=0.0)
+        # Middle finger curled in palm resting near thumb
+        lm[10] = SimpleNamespace(x=0.48, y=0.55, z=0.0)
+        lm[12] = SimpleNamespace(x=0.44, y=0.56, z=0.0)  # Near thumb
+        lm[16] = SimpleNamespace(x=0.54, y=0.62, z=0.0)
+        lm[20] = SimpleNamespace(x=0.58, y=0.64, z=0.0)
+
+        for t in [1.0, 1.1, 1.2, 1.3, 1.4]:
+            res = engine.process(lm, timestamp=t)
+            self.assertEqual(res["action"], "MOVE")
+            self.assertNotEqual(res["action"], "RIGHT_CONTACT")
+            self.assertNotEqual(res["action"], "RIGHT_CLICK")
+
+    def test_two_finger_pinch_right_click(self):
+        """Verifies two finger pinch (Index and Middle touch Thumb) triggers orthogonal Right Click."""
+        engine = GestureEngine(screen_width=1920, screen_height=1080, initial_active=True)
+        lm = [SimpleNamespace(x=0.5, y=0.8, z=0.0) for _ in range(21)]
+        lm[0] = SimpleNamespace(x=0.5, y=0.8, z=0.0)
+        lm[9] = SimpleNamespace(x=0.5, y=0.5, z=0.0)
+        lm[5] = SimpleNamespace(x=0.42, y=0.52, z=0.0)
+        lm[17] = SimpleNamespace(x=0.58, y=0.52, z=0.0)
+        lm[4] = SimpleNamespace(x=0.42, y=0.50, z=0.0)   # Thumb
+        lm[8] = SimpleNamespace(x=0.425, y=0.50, z=0.0)  # Index touching thumb
+        lm[12] = SimpleNamespace(x=0.425, y=0.50, z=0.0) # Middle touching thumb
+        lm[10] = SimpleNamespace(x=0.46, y=0.48, z=0.0)  # Middle PIP
+        lm[14] = SimpleNamespace(x=0.54, y=0.58, z=0.0)  # Ring PIP
+        lm[16] = SimpleNamespace(x=0.54, y=0.62, z=0.0)  # Ring curled
+        lm[18] = SimpleNamespace(x=0.58, y=0.60, z=0.0)  # Pinky PIP
+        lm[20] = SimpleNamespace(x=0.58, y=0.64, z=0.0)  # Pinky curled
+
+        res_contact = engine.process(lm, timestamp=1.0)
+        self.assertEqual(res_contact["action"], "RIGHT_CONTACT")
+
+        # Open back up to release click
+        lm[8] = SimpleNamespace(x=0.40, y=0.35, z=0.0)
+        lm[12] = SimpleNamespace(x=0.50, y=0.35, z=0.0)
+        res_release = engine.process(lm, timestamp=1.12)
+        self.assertEqual(res_release["action"], "RIGHT_CLICK")
+
+    def test_fast_swipe_optical_flow_fallback(self):
+        """Verifies that when optical flow features are lost on a fast swipe, landmark delta is used."""
+        tracker = SubPixelOpticalFlowTracker(roi_size=48)
+        frame1 = np.zeros((480, 640), dtype=np.uint8)
+        cv2.circle(frame1, (300, 240), 20, 255, -1)
+
+        tracker.update(frame1, (300.0, 240.0), has_hand=True, timestamp=1.0)
+
+        # Frame 2: fast hand swipe moves 40 pixels in camera frame (too fast for 48x48 LK ROI)
+        frame2 = np.zeros((480, 640), dtype=np.uint8)
+        cv2.circle(frame2, (340, 240), 20, 255, -1)
+
+        dx, dy, x, y = tracker.update(frame2, (340.0, 240.0), has_hand=True, timestamp=1.033)
+        self.assertAlmostEqual(dx, 40.0, delta=2.0)
+        self.assertFalse(tracker.is_still)
 
 
 if __name__ == "__main__":

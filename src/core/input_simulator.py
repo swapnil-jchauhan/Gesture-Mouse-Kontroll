@@ -139,15 +139,9 @@ class MouseSimulator:
         DOWN -> UP -> DOWN (held). This ensures background windows are focused,
         files and desktop icons enter drag mode, and text selection begins reliably.
         """
-        inputs = (INPUT * 3)()
-        inputs[0].type = INPUT_MOUSE
-        inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN
-        inputs[1].type = INPUT_MOUSE
-        inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP
-        inputs[2].type = INPUT_MOUSE
-        inputs[2].mi.dwFlags = MOUSEEVENTF_LEFTDOWN
-        self.user32.SendInput(3, inputs, ctypes.sizeof(INPUT))
-        self._is_left_down = True
+        self.click()
+        time.sleep(0.04)
+        self.left_down()
 
     def right_click(self):
         """Perform an instantaneous hardware-level right mouse click."""
