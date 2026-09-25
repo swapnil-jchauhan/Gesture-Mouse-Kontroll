@@ -7,3 +7,4 @@ pystray>=0.19.5
 Pillow>=10.0.0
 uiautomation>=2.0.20
 comtypes>=1.2.0
+edge-tts>=7.0.0

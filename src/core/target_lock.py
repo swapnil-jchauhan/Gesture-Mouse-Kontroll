@@ -1,7 +1,9 @@
 """
-OS-Level Sticky Aim Assist & Magnetic Target Snapper for Project Kontroll.
-Detects clickable UI elements across Windows (Buttons, Tabs, Links, Icons, Chrome UI,
-Taskbar, and Window Controls) and provides high-precision sticky magnetic lock.
+OS-Level Viscous Deceleration Aim Assist & Target Lock for Project Kontroll.
+Pillar 5: Replaces hard magnetic teleportation with dynamic viscous deceleration bubbles
+(35 px radius). Velocity slows down smoothly by up to 65% when approaching buttons so the
+cursor settles effortlessly on target without overshoot. Firm click anchor during active
+tap/click motion. Instant breakout on intentional hand flick.
 """
 
 import math
@@ -36,11 +38,11 @@ ROLE_SYSTEM_TITLEBAR = 0x1
 ROLE_SYSTEM_MENUBAR = 0x2
 ROLE_SYSTEM_MENUITEM = 0xC
 ROLE_SYSTEM_LINK = 0x1E
-ROLE_SYSTEM_LISTITEM = 0x22      # Desktop icons, Explorer files/folders
+ROLE_SYSTEM_LISTITEM = 0x22      # Desktop icons, Explorer files
 ROLE_SYSTEM_OUTLINEITEM = 0x24   # Tree folders
-ROLE_SYSTEM_PAGETAB = 0x25       # Browser & window tabs
+ROLE_SYSTEM_PAGETAB = 0x25       # Browser and window tabs
 ROLE_SYSTEM_GRAPHIC = 0x28
-ROLE_SYSTEM_TEXT = 0x2A          # Text boxes / search bars
+ROLE_SYSTEM_TEXT = 0x2A          # Text boxes and search bars
 ROLE_SYSTEM_PUSHBUTTON = 0x2B    # Buttons (Close, Min, Max, OK, Cancel)
 ROLE_SYSTEM_CHECKBUTTON = 0x2C   # Checkboxes
 ROLE_SYSTEM_RADIOBUTTON = 0x2D   # Radio buttons
@@ -62,9 +64,10 @@ CLICKABLE_ROLES = {
     ROLE_SYSTEM_TEXT,
 }
 
+# No dashes or slashes in role names
 ROLE_NAMES = {
     ROLE_SYSTEM_PUSHBUTTON: "BUTTON",
-    ROLE_SYSTEM_LISTITEM: "ICON / FOLDER",
+    ROLE_SYSTEM_LISTITEM: "ICON OR FOLDER",
     ROLE_SYSTEM_OUTLINEITEM: "TREE ITEM",
     ROLE_SYSTEM_PAGETAB: "TAB",
     ROLE_SYSTEM_LINK: "LINK",
@@ -95,14 +98,23 @@ UIA_CLICKABLE_TYPES = {
 
 class TargetLockManager:
     """
-    OS-Level Sticky Aim Assist Manager.
-    Automatically identifies any clickable element across Windows 11 and clings the cursor
-    directly onto the button when in close proximity, preventing twitch drift during taps.
+    OS-Level Viscous Deceleration Aim Assist Manager.
+    Automatically detects clickable UI elements across Windows.
+    Applies viscous deceleration bubbles (35 px) that slow cursor velocity by up to 65%
+    approaching buttons to prevent overshoot, while providing a firm click anchor during taps.
     """
 
-    def __init__(self, capture_radius: float = 42.0, breakout_velocity: float = 750.0):
+    def __init__(
+        self,
+        capture_radius: float = 42.0,
+        breakout_velocity: float = 750.0,
+        bubble_radius: float = 35.0,
+        max_damping: float = 0.65,
+    ):
         self.capture_radius = capture_radius
         self.breakout_velocity = breakout_velocity
+        self.bubble_radius = bubble_radius
+        self.max_damping = max_damping  # Slow down by up to 65%
 
         self.user32 = ctypes.windll.user32
         self.ole32 = ctypes.windll.ole32
@@ -145,6 +157,7 @@ class TargetLockManager:
         self._query_interval = 0.035
         self._cached_target: Optional[Dict[str, Any]] = None
         self._override_target: Optional[Dict[str, Any]] = None
+        self.last_output_pos: Optional[Tuple[float, float]] = None
 
     def query_ui_element(self, x: int, y: int) -> Optional[Dict[str, Any]]:
         """
@@ -305,6 +318,24 @@ class TargetLockManager:
 
         return None
 
+    def compute_viscous_scale(self, distance_to_target: float, velocity: float) -> float:
+        """
+        Computes dynamic velocity scale factor (1.0 = normal speed, down to 0.35 = 65% deceleration).
+        If velocity >= breakout_velocity, returns 1.0 (instant breakout).
+        """
+        if velocity >= self.breakout_velocity:
+            return 1.0
+
+        if distance_to_target >= self.bubble_radius:
+            return 1.0
+
+        # Distance within outer bubble (35 px):
+        # Scale slows down smoothly as distance decreases:
+        # factor = 1.0 - alpha * ((bubble_radius - dist) / bubble_radius)
+        proximity = max(0.0, (self.bubble_radius - distance_to_target) / self.bubble_radius)
+        scale = 1.0 - (self.max_damping * proximity)
+        return max(1.0 - self.max_damping, min(1.0, scale))
+
     def apply_magnetic_lock(
         self,
         raw_x: float,
@@ -314,11 +345,12 @@ class TargetLockManager:
         is_clicking: bool = False,
     ) -> Tuple[int, int, bool, Optional[str]]:
         """
-        Applies OS-Level Sticky Aim Assist.
-        When near any clickable element, the cursor clings securely to the target center.
-        During click motions (is_clicking=True), lock is firmly anchored against finger twitches.
-        When pulling substantially away from the zone or swiping with high intentional flick speed,
-        the cursor breaks out cleanly.
+        Applies OS-Level Viscous Deceleration Aim Assist.
+        Inside button rectangle or during click motions (is_clicking=True):
+        Firmly clings to target center to prevent finger twitch slip.
+        Approaching button boundary:
+        Smooth viscous deceleration dampens velocity by up to 65% to eliminate overshoot.
+        Intentional fast flick breaks out cleanly.
         """
         override = getattr(self, "_override_target", None)
 
@@ -334,10 +366,12 @@ class TargetLockManager:
             # Active Click Anchor: During taps/clicks, hold lock rigidly unless pulled far away (> 120 px)
             if is_clicking:
                 if dist <= 120.0 or inside_pad:
+                    self.last_output_pos = (tcx, tcy)
                     return int(round(tcx)), int(round(tcy)), True, self.last_target_name
                 else:
                     self.is_locked = False
                     self._cached_target = None
+                    self.last_output_pos = (raw_x, raw_y)
             else:
                 # Retention zone: Stay locked unless user substantially, intentionally pulls away
                 should_breakout = False
@@ -347,10 +381,12 @@ class TargetLockManager:
                     should_breakout = True
 
                 if not should_breakout:
+                    self.last_output_pos = (tcx, tcy)
                     return int(round(tcx)), int(round(tcy)), True, self.last_target_name
                 else:
                     self.is_locked = False
                     self._cached_target = None
+                    self.last_output_pos = (raw_x, raw_y)
 
         if override is not None:
             target = override
@@ -369,7 +405,8 @@ class TargetLockManager:
 
         if target is None:
             self.is_locked = False
-            return int(raw_x), int(raw_y), False, None
+            self.last_output_pos = (raw_x, raw_y)
+            return int(round(raw_x)), int(round(raw_y)), False, None
 
         tcx, tcy = target["center"]
         left, top, width, height = target["rect"]
@@ -380,18 +417,59 @@ class TargetLockManager:
         dy = tcy - raw_y
         dist = math.hypot(dx, dy)
 
-        # Check if inside bounding box (with capture padding)
-        pad = max(self.capture_radius, 40.0)
-        inside_box = (left - pad <= raw_x <= left + width + pad) and (top - pad <= raw_y <= top + height + pad)
+        # Check if inside physical element rectangle
+        inside_rect = (left <= raw_x <= left + width) and (top <= raw_y <= top + height)
+        # Calculate distance to element edge
+        dx_edge = max(0.0, max(left - raw_x, raw_x - (left + width)))
+        dy_edge = max(0.0, max(top - raw_y, raw_y - (top + height)))
+        dist_edge = math.hypot(dx_edge, dy_edge)
 
-        if (inside_box or dist <= self.capture_radius) and velocity < self.breakout_velocity:
-            # Engage Sticky Aim Assist! Clings cursor directly onto target center!
+        if velocity >= self.breakout_velocity:
+            self.is_locked = False
+            self.last_output_pos = (raw_x, raw_y)
+            return int(round(raw_x)), int(round(raw_y)), False, None
+
+        # 1. Firm Click Anchor: Active tap/click contact firmly locks onto button center
+        if is_clicking and (inside_rect or dist <= 120.0 or dist_edge <= self.bubble_radius):
             self.is_locked = True
             self.last_target_center = (tcx, tcy)
             self.last_target_rect = (left, top, width, height)
             self.last_target_role = target.get("role", ROLE_SYSTEM_PUSHBUTTON)
             self.last_target_name = role_name
+            self.last_output_pos = (tcx, tcy)
             return int(round(tcx)), int(round(tcy)), True, role_name
 
+        # 2. Inside physical element bounds: Cling to target center
+        if inside_rect:
+            self.is_locked = True
+            self.last_target_center = (tcx, tcy)
+            self.last_target_rect = (left, top, width, height)
+            self.last_target_role = target.get("role", ROLE_SYSTEM_PUSHBUTTON)
+            self.last_target_name = role_name
+            self.last_output_pos = (tcx, tcy)
+            return int(round(tcx)), int(round(tcy)), True, role_name
+
+        # 3. Approaching in outer viscous deceleration bubble (35 px):
+        # Velocity slows down smoothly by up to 65% so the cursor settles on target without overshoot
+        if dist_edge <= self.bubble_radius:
+            scale = self.compute_viscous_scale(dist_edge, velocity)
+            if self.last_output_pos is not None:
+                step_x = raw_x - self.last_output_pos[0]
+                step_y = raw_y - self.last_output_pos[1]
+                out_x = self.last_output_pos[0] + step_x * scale
+                out_y = self.last_output_pos[1] + step_y * scale
+            else:
+                out_x = raw_x
+                out_y = raw_y
+
+            self.is_locked = True
+            self.last_target_center = (tcx, tcy)
+            self.last_target_rect = (left, top, width, height)
+            self.last_target_role = target.get("role", ROLE_SYSTEM_PUSHBUTTON)
+            self.last_target_name = role_name
+            self.last_output_pos = (out_x, out_y)
+            return int(round(out_x)), int(round(out_y)), True, role_name
+
         self.is_locked = False
-        return int(raw_x), int(raw_y), False, None
+        self.last_output_pos = (raw_x, raw_y)
+        return int(round(raw_x)), int(round(raw_y)), False, None

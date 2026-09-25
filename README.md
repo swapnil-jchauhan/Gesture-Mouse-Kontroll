@@ -36,8 +36,8 @@ It is a lightweight software for Windows 11 that:
 * Uses any regular webcam, even cheap potato laptop cameras.
 * Naturally tracks your hand in real time so moving right moves right with zero camera confusion.
 * Has literal OS level sticky aim assist. When your cursor gets close to ANY clickable button, link, tab, Chrome UI, or taskbar icon, it clings hard directly onto it so your clicks never slip off.
-* Can be turned on or off anytime with a quick Shaka sign 🤙.
-* When you log in on boot, it plays an epic Jarvis boot animation with sound effects and runs silently in the background with no black cmd console window.
+* Can be turned on or off anytime with a quick Shaka sign 🤙 (defaults to Standby on launch so it never moves your cursor unexpectedly).
+* When you enter your password and log in, it detects your unlocked desktop and plays an epic Jarvis boot animation with British RyanNeural voice, running silently in the background with no black cmd console window.
 * Removes all jitter so the mouse moves butter smooth.
 
 ---
@@ -53,20 +53,30 @@ It is a lightweight software for Windows 11 that:
 | Left Click ✊ | Make a closed fist and lightly tap your Index fingertip on your Thumb | Instant left click with zero drift and hard sticky lock on buttons |
 | Double Click ✊ | Tap index on thumb twice with a closed fist | Opens folders, apps, or selects words |
 | Drag and Select 👌 | Touch Index on Thumb but keep your last three fingers straight UP | Locks drag to move windows or highlight text, release to drop |
-| Right Click ✌️ | Lightly tap your Index fingertip on your Middle fingertip | Opens right click context menu |
+| Right Click ✊ | Lightly tap your Middle fingertip on your Thumb | Opens right click context menu with 0% ghost clicks (orthogonal physical mouse layout) |
 
-Tilted Dual Monitor Setup: Kontroll automatically calculates your hand 3D knuckle orientation, so it works even if your webcam is on a tilted side monitor. You can also pick your setup in the Tray Menu (Left Monitor, Center, Right).
-
-No Arm Fatigue: You do not need to wave your whole arm around. Rest your elbow on your desk, and relaxed finger wrist twitches move the cursor across the entire screen.
+The 5 Core Engineering Pillars:
+1. Sub-Pixel Optical Flow: Lucas-Kanade refinement delivering Meta Orion level laser mouse stillness with identically (0.00, 0.00) px displacement when held still.
+2. 3D Desk Homography: Projects camera angled line-of-sight (~35° tilt) onto your physical flat desk plane for true horizontal cursor motion.
+3. Orthogonal Gestures: Index=Left Click, Middle=Right Click, Thumb=Base. Completely immune to collinear line-of-sight occlusion.
+4. Relative Ballistics with Air-Clutching: Windows-tuned dynamic S-curve with natural pointing grip engagement and flat hand clutch disengage.
+5. Viscous Deceleration Aim Assist: 35 px aerodynamic drag bubbles slowing cursor by up to 65% on button approach with firm click anchoring.
 
 ---
 
-### The Jarvis Boot Animation
+### The Full Screen Jarvis Boot Sequence
 
-When you enter your password on boot and log into Windows:
-* A glowing holographic neon cyan HUD reticle pops up at the top of your screen.
-* It plays a multi stage Jarvis diagnostic boot sequence with power up chimes.
-* It is 100% click through and never steals window focus from your apps.
+When you boot up and enter your Windows password:
+* Kontroll detects that your workstation is unlocked and Windows Explorer has loaded, then launches the dynamic sci fi holographic Jarvis HUD across your screen at 120 FPS.
+* A manly heavy British voice greets you ("Good morning / afternoon / evening. Systems online sir.") according to your live local time.
+* Features rotating 3D orbital rings, a spinning wireframe globe, reactor core with amber and cyan arcs, light projector beam, live optical sensor waveform, and system telemetry panels.
+* Starts in Standby by default. Making a Shaka sign (🤙) activates or pauses tracking with heavy British voice announcements ("Virtual Control has been activated/deactivated sir").
+* Press Esc, Space, or click anywhere to skip immediately, or let it finish and smoothly fade away to your desktop in ~8 seconds.
+* You can test or replay it anytime with:
+  ```bash
+  python main.py --boot
+  ```
+  Or right click the tray icon and click Replay Jarvis Boot Sequence.
 * Runs silently in your system tray in the background with no black terminal windows.
 
 ---

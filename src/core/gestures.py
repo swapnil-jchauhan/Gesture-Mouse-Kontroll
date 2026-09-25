@@ -1,23 +1,29 @@
 """
 Gesture Detection Engine for Project Kontroll.
-Implements:
-1. Closed-Fist Index-on-Thumb Tap for Left Click & Double Click.
-2. Index-on-Thumb with Three Fingers Up (Super Sign) for Drag & Drop.
-3. Index-on-Middle Tap for Right Click.
-4. OS-Level Sticky Aim Assist integration with Zero Cursor Freezing / Jamming.
-5. S-Curve Dynamic Pointer Acceleration inside Ergonomic Rest Box.
+Pillar 3: Orthogonal Natural Gestures (Physical Mouse Paradigm).
+- Left Click: Closed fist (✊) Index fingertip taps Thumb.
+- Right Click: Middle fingertip taps Thumb (✊/👌 with middle-thumb contact).
+  Completely immune to collinear line-of-sight occlusion in angled cameras; 0% ghost clicks.
+- Drag & Drop: Super gesture (👌, Index on thumb + last 3 fingers up) with Windows priming double-tap-and-hold.
+- Activation/Standby: Hawaiian Shaka sign (🤙).
+- Relative Ballistics & 3D Desk Homography Integration.
 """
 
 import math
 import time
 from typing import Tuple, Optional, Callable, Dict, Any
+
 from src.core.filter import Point2DOneEuroFilter
 from src.core.target_lock import TargetLockManager
+from src.core.homography import DeskHomography
+from src.core.ballistics import RelativeBallisticsEngine
 
 
 class GestureEngine:
     """
     Gesture State Machine & Cursor Mapping Engine for Project Kontroll.
+    Seamlessly integrates 3D Desk Homography, Relative Ballistics with Air-Clutching,
+    Orthogonal Gestures, and Viscous Deceleration Aim Assist.
     """
 
     def __init__(
@@ -26,26 +32,34 @@ class GestureEngine:
         screen_height: int = 1080,
         on_state_change: Optional[Callable[[bool], None]] = None,
         on_click_callback: Optional[Callable[[], None]] = None,
+        initial_active: bool = False,
     ):
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.on_state_change = on_state_change
         self.on_click_callback = on_click_callback
 
-        # System State
-        self.is_active = True
+        # System State (Online / Standby - defaults to Standby)
+        self.is_active = initial_active
 
-        # Camera Mounting Mode: 'auto', 'left' (tilted left monitor), 'center', 'right'
-        self.mount_mode = "left"
-        self.detected_tilt_angle = 25.0
+        # Pillar 2: 3D Desk Homography Engine
+        self.mount_mode = "auto"
+        self.homography = DeskHomography(mode=self.mount_mode, default_tilt_deg=35.0)
 
-        # 1€ Filter: Fast responsive tuning with stillness deadband
+        # Pillar 4: Relative Ballistics Engine with Air-Clutching
+        self.ballistics = RelativeBallisticsEngine(
+            screen_width=self.screen_width,
+            screen_height=self.screen_height,
+            mode="relative",
+        )
+
+        # 1€ Filter: Adaptive Low-Pass Filter with kinetic deadband
         self.cursor_filter = Point2DOneEuroFilter(freq=60.0, min_cutoff=0.8, beta=0.045, deadband_radius=2.2)
 
-        # OS-Level Sticky Aim Assister
-        self.target_lock = TargetLockManager(capture_radius=42.0, breakout_velocity=750.0)
+        # Pillar 5: OS-Level Viscous Deceleration Aim Assister
+        self.target_lock = TargetLockManager(capture_radius=42.0, breakout_velocity=750.0, bubble_radius=35.0)
 
-        # Ergonomic Rest Box (forearm/elbow resting on desk, compact wrist flick)
+        # Ergonomic Rest Box (forearm/elbow resting on desk)
         self.box_xmin = 0.36
         self.box_xmax = 0.64
         self.box_ymin = 0.46
@@ -57,18 +71,18 @@ class GestureEngine:
         self.tap_state = "UP"  # "UP", "DOWN"
         self.tap_start_time = 0.0
 
-        # Right Click Parameters: Index-on-Middle Tap
-        self.right_tap_down_ratio = 0.26
-        self.right_tap_up_ratio = 0.34
-        self.right_click_state = "UP"
+        # Right Click Parameters: Middle-Thumb Tap (Orthogonal, 0% Ghost Clicks)
+        self.right_tap_down_ratio = 0.28
+        self.right_tap_up_ratio = 0.36
+        self.right_click_state = "UP"  # "UP", "DOWN"
         self.right_tap_start_time = 0.0
 
-        # Drag Mode: Index-Thumb with 3 Fingers UP
+        # Drag Mode: Index-Thumb with 3 Fingers UP (Super Gesture 👌)
         self.is_dragging = False
         self.pinch_drag_threshold = 0.28
         self.pinch_start_time = 0.0
 
-        # Shaka Activation Gesture (Pinky & Thumb OUT, 3 Middle Fingers Curled)
+        # Shaka Activation Gesture (🤙: Thumb & Pinky OUT, 3 Middle Fingers Curled)
         self.shaka_start_time = 0.0
         self.shaka_triggered = False
         self.shaka_hold_duration = 0.35
@@ -78,15 +92,28 @@ class GestureEngine:
         self.last_click_time = 0.0
         self.last_click_pos = (screen_width // 2, screen_height // 2)
 
+        # Previous frame landmark position for delta calculation
+        self._prev_norm_pos: Optional[Tuple[float, float]] = None
+        self._last_process_time: float = time.perf_counter()
+
         # Telemetry
         self.last_screen_x = screen_width // 2
         self.last_screen_y = screen_height // 2
         self.last_is_locked = False
         self.last_target_desc = None
+        self.detected_tilt_angle = 35.0
+
+    @property
+    def tracking_mode(self) -> str:
+        return self.ballistics.mode
+
+    def set_tracking_mode(self, mode: str):
+        self.ballistics.set_mode(mode)
 
     def update_screen_size(self, width: int, height: int):
         self.screen_width = width
         self.screen_height = height
+        self.ballistics.update_screen_size(width, height)
 
     def reset_hand_state(self):
         """Called when no hand is in view to clear all active states immediately."""
@@ -98,6 +125,8 @@ class GestureEngine:
         self.shaka_triggered = False
         self.last_is_locked = False
         self.last_target_desc = None
+        self._prev_norm_pos = None
+        self.cursor_filter.reset()
 
     @staticmethod
     def _dist_3d(p1, p2) -> float:
@@ -113,15 +142,12 @@ class GestureEngine:
 
     def is_fist_closed(self, landmarks, scale: float) -> bool:
         """
-        Detects if the middle, ring, and pinky fingers are curled closed into a fist.
-        In a fist, tips are folded down towards the palm/knuckles in 3D.
+        Detects if middle, ring, and pinky fingers are curled closed into palm.
         """
-        # 3D distance from fingertips to their MCP knuckles (9, 13, 17)
         d_m_mcp = self._dist_3d(landmarks[12], landmarks[9]) / scale
         d_r_mcp = self._dist_3d(landmarks[16], landmarks[13]) / scale
         d_p_mcp = self._dist_3d(landmarks[20], landmarks[17]) / scale
 
-        # 3D distance to wrist (0)
         d_m_wrist = self._dist_3d(landmarks[12], landmarks[0]) / scale
         d_r_wrist = self._dist_3d(landmarks[16], landmarks[0]) / scale
         d_p_wrist = self._dist_3d(landmarks[20], landmarks[0]) / scale
@@ -169,9 +195,9 @@ class GestureEngine:
 
     def is_shaka_gesture(self, landmarks) -> bool:
         """
-        Detects the Shaka Activation Gesture (🤙):
+        Detects the Hawaiian Shaka Activation Gesture (🤙):
         Thumb (4) and Pinky (20) are fully extended OUT,
-        while Index (8), Middle (12), and Ring (16) are curled IN against the palm.
+        while Index (8), Middle (12), and Ring (16) are curled IN against palm.
         """
         scale = self._get_hand_scale(landmarks)
 
@@ -207,21 +233,29 @@ class GestureEngine:
 
     def is_super_gesture(self, landmarks) -> bool:
         """
-        Detects the 'Super / OK' pose:
+        Detects the 'Super / OK' pose (👌):
         Index touches Thumb while last three fingers (Middle, Ring, Pinky) are straight UP.
         """
         scale = self._get_hand_scale(landmarks)
         d_thumb_index = self._dist_3d(landmarks[4], landmarks[8]) / scale
         return (d_thumb_index < self.pinch_drag_threshold) and self.are_last_three_up(landmarks)
 
-    def process(self, landmarks, timestamp: Optional[float] = None) -> Dict[str, Any]:
+    def process(
+        self,
+        landmarks,
+        timestamp: Optional[float] = None,
+        optical_flow_delta: Optional[Tuple[float, float]] = None,
+    ) -> Dict[str, Any]:
         """
-        Processes a frame of hand landmarks and outputs cursor position, action, and telemetry.
+        Processes a frame of hand landmarks and optional optical flow displacement.
         """
         now = timestamp if timestamp is not None else time.perf_counter()
+        dt = max(1e-4, min(0.05, now - self._last_process_time))
+        self._last_process_time = now
+
         scale = self._get_hand_scale(landmarks)
 
-        # 0. Shaka Activation / Toggle Gesture Detection (Pinky & Thumb OUT)
+        # 0. Shaka Activation / Toggle Gesture Detection (🤙)
         shaka_pose_active = self.is_shaka_gesture(landmarks)
         if shaka_pose_active:
             if self.shaka_start_time == 0.0:
@@ -246,85 +280,121 @@ class GestureEngine:
                 "target_desc": None,
             }
 
-        # 1. Distances and Pose Classifications
+        # 1. Distances and Orthogonal Gestures Detection
         d_thumb_index = self._dist_3d(landmarks[4], landmarks[8]) / scale
-        d_index_middle = self._dist_3d(landmarks[8], landmarks[12]) / scale
+        d_thumb_middle = self._dist_3d(landmarks[4], landmarks[12]) / scale
         fist_closed = self.is_fist_closed(landmarks, scale)
         three_fingers_up = self.are_last_three_up(landmarks)
 
-        # Left Click: Index on Thumb with Closed Fist
-        is_left_contact = (d_thumb_index < self.tap_down_ratio) and fist_closed
+        # Left Click: Closed fist (✊) Index fingertip taps Thumb (Index closer to thumb than middle)
+        is_left_contact = (d_thumb_index < self.tap_down_ratio) and (d_thumb_index < d_thumb_middle) and fist_closed
 
-        # Drag: Index on Thumb with Last Three Fingers UP (Super Pose)
+        # Drag: Index on Thumb with Last Three Fingers UP (👌 Super Gesture)
         drag_pose_active = (d_thumb_index < self.pinch_drag_threshold) and three_fingers_up
 
-        # Right Click: Index on Middle tap with both extended
-        d_idx_mcp = self._dist_3d(landmarks[8], landmarks[5]) / scale
-        d_mid_mcp = self._dist_3d(landmarks[12], landmarks[9]) / scale
-        index_extended = (d_idx_mcp > 0.52) or (self._dist_3d(landmarks[8], landmarks[0]) / scale > 1.05) or (landmarks[8].y < landmarks[6].y + 0.02)
-        middle_extended = (d_mid_mcp > 0.52) or (self._dist_3d(landmarks[12], landmarks[0]) / scale > 1.05) or (landmarks[12].y < landmarks[10].y + 0.02)
-        is_right_contact = (d_index_middle < self.right_tap_down_ratio) and index_extended and middle_extended
+        # Right Click (Pillar 3 Orthogonal Gesture): Middle fingertip taps Thumb (✊/👌 with middle-thumb contact)
+        # Ring and pinky curled; middle touches thumb. Middle is closer to thumb than index.
+        # Completely immune to collinear line-of-sight occlusion!
+        d_ring_mcp = self._dist_3d(landmarks[16], landmarks[13]) / scale
+        d_pinky_mcp = self._dist_3d(landmarks[20], landmarks[17]) / scale
+        ring_pinky_curled = (d_ring_mcp < 0.72) and (d_pinky_mcp < 0.72)
+        is_right_contact = (
+            (d_thumb_middle < self.right_tap_down_ratio)
+            and (d_thumb_middle < d_thumb_index)
+            and (ring_pinky_curled or fist_closed or three_fingers_up)
+        )
 
-        # Click Intent / Active Tap Detection:
+        # Click Intent / Active Tap Detection for Firm Anchor
         click_intent = (
             is_left_contact
             or (self.tap_state == "DOWN")
             or is_right_contact
             or (self.right_click_state == "DOWN")
             or (d_thumb_index < self.tap_up_ratio * 1.35 and fist_closed)
-            or (d_index_middle < self.right_tap_up_ratio * 1.35 and index_extended and middle_extended)
+            or (d_thumb_middle < self.right_tap_up_ratio * 1.35)
             or ((now - self.last_click_time) < 0.25)
         )
 
-        # 2. Cursor Tracking Point: Index Fingertip (Horizontally Mirrored)
-        norm_x = 1.0 - landmarks[8].x
+        # 2. Air-Clutching Check (Pillar 4)
+        is_pointing, is_clutched = self.ballistics.check_air_clutch(landmarks, scale)
+
+        # 3. Position and Motion Calculation
+        norm_x = 1.0 - landmarks[8].x  # Mirrored for natural user perspective
         norm_y = landmarks[8].y
 
-        # Camera Tilt Correction
-        rot_angle = 0.0
+        # Update homography mounting mode and estimate tilt if auto
+        self.homography.set_mode(self.mount_mode)
         if self.mount_mode == "auto":
-            dx_hand = (1.0 - landmarks[9].x) - (1.0 - landmarks[0].x)
-            dy_hand = landmarks[9].y - landmarks[0].y
-            if dy_hand < -0.05:
-                tilt_deg = math.degrees(math.atan2(dx_hand, -dy_hand))
-                self.detected_tilt_angle = tilt_deg
-                if abs(tilt_deg) > 12.0:
-                    rot_angle = -math.radians(tilt_deg)
-        elif self.mount_mode == "left":
-            rot_angle = math.radians(-24.0)
-        elif self.mount_mode == "right":
-            rot_angle = math.radians(24.0)
+            self.detected_tilt_angle = self.homography.estimate_camera_tilt(landmarks)
+        else:
+            self.detected_tilt_angle = self.homography.get_effective_tilt_deg()
 
-        if abs(rot_angle) > 1e-4:
-            cos_a = math.cos(rot_angle)
-            sin_a = math.sin(rot_angle)
-            cx_ref, cy_ref = 0.5, 0.6
-            dx = norm_x - cx_ref
-            dy = norm_y - cy_ref
-            norm_x = cx_ref + (dx * cos_a - dy * sin_a)
-            norm_y = cy_ref + (dx * sin_a + dy * cos_a)
-
-        # 3. Absolute Mapping inside Ergonomic Rest Box
+        # Compute Absolute Screen Coordinates (Fallback / Calibration)
+        unwarped_norm_x, unwarped_norm_y = self.homography.transform_point(norm_x, norm_y, landmarks)
         box_w = max(0.001, self.box_xmax - self.box_xmin)
         box_h = max(0.001, self.box_ymax - self.box_ymin)
-
-        u = (norm_x - self.box_xmin) / box_w
-        v = (norm_y - self.box_ymin) / box_h
-        u = max(0.0, min(1.0, u))
-        v = max(0.0, min(1.0, v))
-
-        # Smooth S-Curve: Precision in center, gentle reach near edges
+        u = max(0.0, min(1.0, (unwarped_norm_x - self.box_xmin) / box_w))
+        v = max(0.0, min(1.0, (unwarped_norm_y - self.box_ymin) / box_h))
         u_curved = 0.5 + math.copysign(0.5 * (abs(2.0 * (u - 0.5)) ** 1.15), u - 0.5)
         v_curved = 0.5 + math.copysign(0.5 * (abs(2.0 * (v - 0.5)) ** 1.15), v - 0.5)
+        abs_screen_x = u_curved * float(self.screen_width - 1)
+        abs_screen_y = v_curved * float(self.screen_height - 1)
 
-        raw_screen_x = u_curved * float(self.screen_width - 1)
-        raw_screen_y = v_curved * float(self.screen_height - 1)
+        # Motion displacement delta
+        if is_left_contact or self.tap_state == "DOWN" or is_right_contact or self.right_click_state == "DOWN":
+            # Pin cursor during active physical tap-down: finger actuation motion is not a mouse swipe
+            screen_dx = 0.0
+            screen_dy = 0.0
+        elif optical_flow_delta is not None:
+            # Pillar 1: Sub-pixel optical flow displacement
+            if abs(optical_flow_delta[0]) < 1e-6 and abs(optical_flow_delta[1]) < 1e-6:
+                # Laser-mouse stillness guarantee: identically (0.00, 0.00) px displacement
+                screen_dx = 0.0
+                screen_dy = 0.0
+            else:
+                # Invert camera X so physical rightward movement is positive
+                cam_dx = -optical_flow_delta[0]
+                cam_dy = optical_flow_delta[1]
+                desk_dx, desk_dy = self.homography.transform_vector(cam_dx, cam_dy, landmarks)
+                # Scale to screen pixel space
+                screen_dx = desk_dx * (self.screen_width / 640.0)
+                screen_dy = desk_dy * (self.screen_height / 480.0)
+        elif self._prev_norm_pos is not None:
+            # Fallback to neural landmarks only when optical flow is unavailable
+            raw_dx = (norm_x - self._prev_norm_pos[0]) * float(self.screen_width)
+            raw_dy = (norm_y - self._prev_norm_pos[1]) * float(self.screen_height)
+            desk_dx, desk_dy = self.homography.transform_vector(raw_dx, raw_dy, landmarks)
+            screen_dx = desk_dx
+            screen_dy = desk_dy
+        else:
+            screen_dx = 0.0
+            screen_dy = 0.0
 
-        # 1€ Adaptive Low-Pass Filter
-        smooth_x, smooth_y = self.cursor_filter.filter(raw_screen_x, raw_screen_y, timestamp=now)
+        if self._prev_norm_pos is None:
+            if self.ballistics.mode == "absolute":
+                self.ballistics.reset_position(abs_screen_x, abs_screen_y)
+
+        self._prev_norm_pos = (norm_x, norm_y)
+
+        # Update Relative Ballistics with Air-Clutching (Pillar 4)
+        if self.ballistics.mode == "relative":
+            ballistic_x, ballistic_y, raw_vel = self.ballistics.update(
+                dx=screen_dx,
+                dy=screen_dy,
+                dt=dt,
+                is_engaged=is_pointing and not is_clutched,
+                absolute_pos=(abs_screen_x, abs_screen_y),
+            )
+        else:
+            ballistic_x = abs_screen_x
+            ballistic_y = abs_screen_y
+            raw_vel = math.hypot(screen_dx, screen_dy) / dt
+
+        # 1€ Filter Smoothing
+        smooth_x, smooth_y = self.cursor_filter.filter(ballistic_x, ballistic_y, timestamp=now)
         velocity = self.cursor_filter.last_velocity
 
-        # 4. OS-Level Sticky Aim Assist (clings directly onto buttons, icons, links)
+        # Pillar 5: OS-Level Viscous Deceleration Aim Assist
         is_locked = False
         target_desc = None
         if not self.is_dragging:
@@ -332,14 +402,14 @@ class GestureEngine:
                 smooth_x, smooth_y, velocity=velocity, timestamp=now, is_clicking=click_intent
             )
         else:
-            snapped_x, snapped_y = int(smooth_x), int(smooth_y)
+            snapped_x, snapped_y = int(round(smooth_x)), int(round(smooth_y))
 
         current_screen_x = snapped_x
         current_screen_y = snapped_y
 
         action = "MOVE"
 
-        # 5. Drag & Drop State Machine (Super Pose: Index-Thumb + 3 Fingers Up)
+        # 4. Drag & Drop State Machine (👌 Super Gesture)
         if drag_pose_active:
             if not self.is_dragging:
                 if self.pinch_start_time == 0.0:
@@ -352,8 +422,12 @@ class GestureEngine:
             self.last_screen_x = current_screen_x
             self.last_screen_y = current_screen_y
             return {
-                "active": True, "cursor_x": current_screen_x, "cursor_y": current_screen_y,
-                "action": action, "tap_ratio": d_thumb_index, "is_locked": is_locked,
+                "active": True,
+                "cursor_x": current_screen_x,
+                "cursor_y": current_screen_y,
+                "action": action,
+                "tap_ratio": d_thumb_index,
+                "is_locked": is_locked,
                 "target_desc": "PINCH DRAG",
             }
         elif self.is_dragging:
@@ -363,27 +437,31 @@ class GestureEngine:
             self.last_screen_x = current_screen_x
             self.last_screen_y = current_screen_y
             return {
-                "active": True, "cursor_x": current_screen_x, "cursor_y": current_screen_y,
-                "action": action, "tap_ratio": d_thumb_index, "is_locked": is_locked,
+                "active": True,
+                "cursor_x": current_screen_x,
+                "cursor_y": current_screen_y,
+                "action": action,
+                "tap_ratio": d_thumb_index,
+                "is_locked": is_locked,
                 "target_desc": None,
             }
 
-        # 6. Right-Click State Machine (Index on Middle Tap)
+        # 5. Right-Click State Machine (Middle-Thumb Tap)
         if self.right_click_state == "UP":
-            if is_right_contact:
+            if is_right_contact and self.tap_state == "UP":
                 self.right_click_state = "DOWN"
                 self.right_tap_start_time = now
                 action = "RIGHT_CONTACT"
         elif self.right_click_state == "DOWN":
-            if not is_right_contact or d_index_middle > self.right_tap_up_ratio:
+            if not is_right_contact or d_thumb_middle > self.right_tap_up_ratio:
                 self.right_click_state = "UP"
                 action = "RIGHT_CLICK"
             elif (now - self.right_tap_start_time) > 0.40:
                 self.right_click_state = "UP"
 
-        # 7. Left-Click State Machine (Closed-Fist Index-Thumb Tap, ZERO CURSOR JAMMING)
+        # 6. Left-Click State Machine (Closed-Fist Index-Thumb Tap)
         if self.tap_state == "UP":
-            if is_left_contact:
+            if is_left_contact and action not in ("RIGHT_CONTACT", "RIGHT_CLICK") and self.right_click_state == "UP":
                 self.tap_state = "DOWN"
                 self.tap_start_time = now
                 action = "TAP_CONTACT"
@@ -393,23 +471,24 @@ class GestureEngine:
                 self.tap_state = "UP"
                 click_pos = (current_screen_x, current_screen_y)
 
-                if (now - self.last_click_time) <= self.double_click_window:
-                    dx_prev = click_pos[0] - self.last_click_pos[0]
-                    dy_prev = click_pos[1] - self.last_click_pos[1]
-                    if math.hypot(dx_prev, dy_prev) <= 220.0:
-                        action = "DOUBLE_CLICK"
-                        self.last_click_time = 0.0
+                if action not in ("RIGHT_CONTACT", "RIGHT_CLICK"):
+                    if (now - self.last_click_time) <= self.double_click_window:
+                        dx_prev = click_pos[0] - self.last_click_pos[0]
+                        dy_prev = click_pos[1] - self.last_click_pos[1]
+                        if math.hypot(dx_prev, dy_prev) <= 220.0:
+                            action = "DOUBLE_CLICK"
+                            self.last_click_time = 0.0
+                        else:
+                            action = "CLICK"
+                            self.last_click_time = now
+                            self.last_click_pos = click_pos
                     else:
                         action = "CLICK"
                         self.last_click_time = now
                         self.last_click_pos = click_pos
-                else:
-                    action = "CLICK"
-                    self.last_click_time = now
-                    self.last_click_pos = click_pos
 
-                if self.on_click_callback:
-                    self.on_click_callback()
+                    if self.on_click_callback:
+                        self.on_click_callback()
 
             elif contact_duration > 0.40:
                 self.tap_state = "UP"
@@ -429,4 +508,5 @@ class GestureEngine:
             "super_detected": three_fingers_up and (d_thumb_index < self.pinch_drag_threshold),
             "is_locked": is_locked,
             "target_desc": target_desc,
+            "is_clutched": is_clutched,
         }

@@ -1,7 +1,9 @@
 """
-Threaded Camera Capture & MediaPipe Hand Tracking Engine for Project Kontroll.
-Optimized for low-latency (model_complexity=0), MJPEG hardware stream,
-and adaptive low-light contrast enhancement.
+Threaded Camera Capture & Dual-Engine Hand Tracking for Project Kontroll.
+Combines:
+- Engine A: MediaPipe HandLandmarker for 21 3D global anatomical landmarks.
+- Engine B: Sub-Pixel Pyramidal Lucas-Kanade Optical Flow (Pillar 1) on full-resolution
+  camera frames inside a 48x48 ROI around index fingertip.
 """
 
 import threading
@@ -9,6 +11,8 @@ import time
 from typing import Optional, Tuple, Any
 import cv2
 import numpy as np
+
+from src.core.optical_flow import SubPixelOpticalFlowTracker
 
 try:
     import mediapipe as mp
@@ -22,7 +26,7 @@ except ImportError:
 
 class HandTracker:
     """
-    Dedicated worker thread capturing webcam frames and extracting 21 3D hand landmarks.
+    Dedicated worker thread capturing webcam frames and driving the Dual-Engine Tracking Pipeline.
     """
 
     def __init__(
@@ -42,8 +46,7 @@ class HandTracker:
         # OpenCV CLAHE for low-light noise resilience
         self.clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(8, 8))
 
-        # MediaPipe Hands pipeline:
-        # Use model_complexity=0 for ultra-fast inference (8-10ms vs 35-50ms)
+        # MediaPipe Hands pipeline (Global Neural Engine)
         self.hands_detector = None
         if mp_hands:
             self.hands_detector = mp_hands.Hands(
@@ -53,6 +56,9 @@ class HandTracker:
                 min_tracking_confidence=0.60,
                 model_complexity=0,
             )
+
+        # Sub-Pixel Optical Flow Engine (Pillar 1)
+        self.optical_flow = SubPixelOpticalFlowTracker(roi_size=48)
 
         # Threading & Shared State
         self._cap = None
@@ -67,6 +73,8 @@ class HandTracker:
         self.fps_metric = 0.0
         self.inference_time_ms = 0.0
         self.has_hand = False
+        self.latest_optical_flow_delta: Tuple[float, float] = (0.0, 0.0)
+        self.latest_fused_pt: Tuple[float, float] = (0.0, 0.0)
 
     def start(self):
         """Initializes camera and launches background worker thread."""
@@ -103,16 +111,15 @@ class HandTracker:
         if self._cap:
             self._cap.release()
             self._cap = None
+        self.optical_flow.reset()
 
     def _enhance_frame(self, bgr_frame: np.ndarray) -> np.ndarray:
         """Applies CLAHE on luminance only if the scene is noticeably dark (< 75 mean brightness)."""
         if not self.enhance_low_light:
             return bgr_frame
         try:
-            # Check fast mean brightness
             mean_b = np.mean(bgr_frame[::8, ::8, 0])
             if mean_b > 75.0:
-                # Room is sufficiently lit; skip heavy color conversion
                 return bgr_frame
 
             lab = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2LAB)
@@ -124,7 +131,7 @@ class HandTracker:
             return bgr_frame
 
     def _worker_loop(self):
-        """Continuously pulls frames, extracts landmarks, and updates state."""
+        """Continuously pulls frames, extracts landmarks, runs optical flow, and updates state."""
         frame_count = 0
         fps_timer = time.perf_counter()
 
@@ -160,9 +167,20 @@ class HandTracker:
                 results = self.hands_detector.process(rgb)
                 if results.multi_hand_landmarks:
                     hand_detected = True
-                    # Grab primary tracked hand
                     landmarks = results.multi_hand_landmarks[0].landmark
             self.inference_time_ms = (time.perf_counter() - t_inf_start) * 1000.0
+
+            # Dual-Engine: Optical Flow Refinement
+            flow_dx, flow_dy = 0.0, 0.0
+            fused_x, fused_y = 0.0, 0.0
+            if hand_detected and landmarks:
+                fh, fw = frame.shape[:2]
+                idx_px = (landmarks[8].x * fw, landmarks[8].y * fh)
+                flow_dx, flow_dy, fused_x, fused_y = self.optical_flow.update(
+                    frame, idx_px, has_hand=True, timestamp=now
+                )
+            else:
+                self.optical_flow.reset()
 
             # Thread-safe state update
             with self._lock:
@@ -170,8 +188,9 @@ class HandTracker:
                 self.latest_frame = frame
                 self.latest_timestamp = now
                 self.has_hand = hand_detected
+                self.latest_optical_flow_delta = (flow_dx, flow_dy)
+                self.latest_fused_pt = (fused_x, fused_y)
 
-            # Small yield to prevent thread starvation
             time.sleep(0.001)
 
     def get_latest_data(self) -> Tuple[Optional[Any], Optional[np.ndarray], float, bool, float]:
@@ -187,3 +206,8 @@ class HandTracker:
                 self.has_hand,
                 self.fps_metric,
             )
+
+    def get_optical_flow_delta(self) -> Tuple[float, float]:
+        """Returns the latest sub-pixel optical flow displacement delta (dx, dy)."""
+        with self._lock:
+            return self.latest_optical_flow_delta

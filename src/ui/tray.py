@@ -1,7 +1,7 @@
 """
 Windows System Tray Controller for Project Kontroll.
 Uses PyQt6 QSystemTrayIcon for seamless integration with Windows 11 notification area.
-Provides autostart toggling, calibration launch, camera angle mode, and status monitoring.
+Provides autostart toggling, calibration launch, camera angle mode, tracking mode, and status monitoring.
 """
 
 from typing import Optional, Callable
@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QApplication
 from src.service.autostart import is_autostart_enabled, enable_autostart, disable_autostart
 
 
-def create_tray_icon_pixmap(is_active: bool = True) -> QPixmap:
+def create_tray_icon_pixmap(is_active: bool = False) -> QPixmap:
     """Generates a crisp, high-DPI cyber-reactor system tray icon."""
     size = 64
     pixmap = QPixmap(size, size)
@@ -24,7 +24,7 @@ def create_tray_icon_pixmap(is_active: bool = True) -> QPixmap:
     center = size / 2.0
     color = QColor(0, 240, 255) if is_active else QColor(255, 170, 0)
 
-    # Outer hex / ring
+    # Outer hex ring
     pen = QPen(color, 4)
     painter.setPen(pen)
     painter.drawEllipse(6, 6, size - 12, size - 12)
@@ -56,17 +56,22 @@ class SystemTrayManager:
         on_open_calibration: Callable[[], None],
         on_exit: Callable[[], None],
         on_mount_mode_change: Optional[Callable[[str], None]] = None,
+        on_tracking_mode_change: Optional[Callable[[str], None]] = None,
+        on_replay_boot: Optional[Callable[[], None]] = None,
+        initial_active: bool = False,
     ):
         self.on_toggle_active = on_toggle_active
         self.on_open_calibration = on_open_calibration
         self.on_exit = on_exit
         self.on_mount_mode_change = on_mount_mode_change
+        self.on_tracking_mode_change = on_tracking_mode_change
+        self.on_replay_boot = on_replay_boot
 
         self.tray_icon = QSystemTrayIcon()
-        self.is_active = True
+        self.is_active = initial_active
 
         self._build_menu()
-        self.update_state(True)
+        self.update_state(initial_active)
         self.tray_icon.show()
 
     def _build_menu(self):
@@ -96,7 +101,7 @@ class SystemTrayManager:
         """)
 
         # Header Title
-        self.header_action = self.menu.addAction("PROJECT KONTROLL // AR MOUSE")
+        self.header_action = self.menu.addAction("PROJECT KONTROLL . AR MOUSE")
         self.header_action.setEnabled(False)
 
         self.menu.addSeparator()
@@ -105,17 +110,37 @@ class SystemTrayManager:
         self.status_action = self.menu.addAction("● Status: Active")
         self.status_action.triggered.connect(self.on_toggle_active)
 
+        # Replay Boot Sequence
+        if self.on_replay_boot:
+            self.boot_action = self.menu.addAction("Replay Jarvis Boot Sequence")
+            self.boot_action.triggered.connect(self.on_replay_boot)
+
         # Calibration
-        self.calib_action = self.menu.addAction("Launch Calibration & Diagnostics")
+        self.calib_action = self.menu.addAction("Launch Calibration and Diagnostics")
         self.calib_action.triggered.connect(self.on_open_calibration)
 
         self.menu.addSeparator()
+
+        # Tracking Mode Submenu
+        self.tracking_menu = self.menu.addMenu("Tracking Ballistics Mode")
+        self.tracking_group = QActionGroup(self.tracking_menu)
+
+        act_rel = self.tracking_menu.addAction("Relative Ballistics with Air Clutching (Recommended)")
+        act_rel.setCheckable(True)
+        act_rel.setChecked(True)
+        self.tracking_group.addAction(act_rel)
+        act_rel.triggered.connect(lambda: self._set_tracking_mode("relative"))
+
+        act_abs = self.tracking_menu.addAction("Absolute Screen Mapping")
+        act_abs.setCheckable(True)
+        self.tracking_group.addAction(act_abs)
+        act_abs.triggered.connect(lambda: self._set_tracking_mode("absolute"))
 
         # Camera Mounting Angle Submenu
         self.mount_menu = self.menu.addMenu("Webcam Mounting Angle")
         self.mount_group = QActionGroup(self.mount_menu)
 
-        act_auto = self.mount_menu.addAction("Auto-Compensate Angle (Recommended)")
+        act_auto = self.mount_menu.addAction("Auto Compensate Angle (Recommended)")
         act_auto.setCheckable(True)
         act_auto.setChecked(True)
         self.mount_group.addAction(act_auto)
@@ -156,6 +181,10 @@ class SystemTrayManager:
         if self.on_mount_mode_change:
             self.on_mount_mode_change(mode)
 
+    def _set_tracking_mode(self, mode: str):
+        if self.on_tracking_mode_change:
+            self.on_tracking_mode_change(mode)
+
     def _toggle_autostart(self, checked: bool):
         if checked:
             enable_autostart()
@@ -171,7 +200,7 @@ class SystemTrayManager:
 
         if is_active:
             self.status_action.setText("● Status: Active (Tracking ON)")
-            self.tray_icon.setToolTip("Project Kontroll: ONLINE (Index-Tap to Click, Super-Gesture to Standby)")
+            self.tray_icon.setToolTip("Project Kontroll: ONLINE (Index Tap to Click, Shaka Sign 🤙 to Standby)")
         else:
             self.status_action.setText("○ Status: Standby (Paused)")
-            self.tray_icon.setToolTip("Project Kontroll: STANDBY (Use Super-Gesture 👌 to activate)")
+            self.tray_icon.setToolTip("Project Kontroll: STANDBY (Use Shaka Sign 🤙 to activate)")

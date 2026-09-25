@@ -23,10 +23,11 @@ from src.core.input_simulator import MouseSimulator
 from src.ui.hud_overlay import JarvisHudOverlay
 from src.ui.debug_window import DebugWindow
 from src.ui.tray import SystemTrayManager
+from src.service.session import is_workstation_unlocked
 
 
 class KontrollApp:
-    def __init__(self, show_debug: bool = False, is_autostart_launch: bool = False):
+    def __init__(self, show_debug: bool = False, is_autostart_launch: bool = False, is_boot_launch: bool = False):
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
 
@@ -36,14 +37,15 @@ class KontrollApp:
         # 2. Initialize HUD Overlay (Transparent, Click-Through)
         self.hud = JarvisHudOverlay()
 
-        # 3. Initialize Gesture Engine
+        # 3. Initialize Gesture Engine (5 Core Pillars - defaults to Standby)
         self.gestures = GestureEngine(
             screen_width=self.mouse.screen_width,
             screen_height=self.mouse.screen_height,
             on_state_change=self._on_gesture_state_toggled,
+            initial_active=False,
         )
 
-        # 4. Initialize Hand Tracker (Threaded Camera + MediaPipe)
+        # 4. Initialize Hand Tracker (Threaded Camera + MediaPipe + Sub-Pixel Optical Flow)
         self.tracker = HandTracker(camera_index=0, width=640, height=480, target_fps=60)
         self.tracker.start()
 
@@ -52,12 +54,15 @@ class KontrollApp:
         if show_debug:
             self.debug_window.show()
 
-        # 6. Initialize System Tray
+        # 6. Initialize System Tray (reflects Standby by default)
         self.tray = SystemTrayManager(
             on_toggle_active=self._toggle_active_manual,
             on_open_calibration=self._open_calibration,
             on_exit=self.shutdown,
             on_mount_mode_change=self._set_mount_mode,
+            on_tracking_mode_change=self._set_tracking_mode,
+            on_replay_boot=self._replay_boot_sequence,
+            initial_active=self.gestures.is_active,
         )
 
         # 7. 120 Hz Motion Extrapolator & High-Rate Loop (8ms = ~125 Hz)
@@ -74,14 +79,45 @@ class KontrollApp:
         self.loop_timer.timeout.connect(self._process_frame_tick)
         self.loop_timer.start(8)  # 120 Hz
 
-        # Initial Jarvis Boot Sequence HUD
-        if is_autostart_launch:
-            QTimer.singleShot(1000, lambda: self.hud.trigger_boot_sequence())
+        # Initial Jarvis Boot Sequence HUD (post-login verification)
+        if is_boot_launch:
+            QTimer.singleShot(100, lambda: self.hud.trigger_boot_sequence())
         else:
+            self._schedule_boot_after_login(is_autostart=is_autostart_launch)
+
+    def _schedule_boot_after_login(self, is_autostart: bool):
+        """
+        Ensures the Jarvis dynamic boot sequence only executes AFTER the user enters their password
+        and reaches their interactive unlocked desktop.
+        """
+        # If launched manually and workstation is already unlocked, start after short 350ms delay
+        if not is_autostart and is_workstation_unlocked():
             QTimer.singleShot(350, lambda: self.hud.trigger_boot_sequence())
+            return
+
+        # On autostart / system boot or if workstation is currently locked:
+        # Poll workstation unlock status every 300ms until user logs in.
+        self._login_check_timer = QTimer()
+        self._login_check_timer.setInterval(300)
+
+        def _check_unlocked():
+            if is_workstation_unlocked():
+                self._login_check_timer.stop()
+                # User has entered password and desktop is active.
+                # Allow an 800ms buffer for desktop shell to paint, then fire boot sequence!
+                QTimer.singleShot(800, lambda: self.hud.trigger_boot_sequence())
+
+        self._login_check_timer.timeout.connect(_check_unlocked)
+        self._login_check_timer.start()
 
     def _set_mount_mode(self, mode: str):
         self.gestures.mount_mode = mode
+
+    def _set_tracking_mode(self, mode: str):
+        self.gestures.set_tracking_mode(mode)
+
+    def _replay_boot_sequence(self):
+        self.hud.trigger_boot_sequence()
 
     def _on_gesture_state_toggled(self, is_active: bool):
         self.hud.trigger_popup(is_active)
@@ -99,7 +135,7 @@ class KontrollApp:
         self.debug_window.activateWindow()
 
     def _process_frame_tick(self):
-        """120 Hz High-Rate Tick: processes new camera frames or extrapolates smoothly at 120 FPS."""
+        """120 Hz High-Rate Tick: processes new camera frames and dispatches hardware mouse events."""
         now = time.perf_counter()
         dt = max(1e-4, min(0.04, now - self.last_tick_time))
         self.last_tick_time = now
@@ -118,8 +154,11 @@ class KontrollApp:
         if timestamp > self.last_frame_timestamp:
             self.last_frame_timestamp = timestamp
 
-            # Process gestures
-            result = self.gestures.process(landmarks, timestamp=timestamp)
+            # Process Dual-Engine Pipeline: Optical Flow delta + Global landmarks
+            flow_delta = self.tracker.get_optical_flow_delta()
+            result = self.gestures.process(
+                landmarks, timestamp=timestamp, optical_flow_delta=flow_delta
+            )
 
             if result.get("active"):
                 action = result.get("action", "MOVE")
@@ -148,8 +187,12 @@ class KontrollApp:
         return self.app.exec()
 
     def shutdown(self):
+        if hasattr(self, "_login_check_timer") and self._login_check_timer.isActive():
+            self._login_check_timer.stop()
         if self.mouse.is_dragging:
             self.mouse.left_up()
+        from src.core.voice import stop_audio
+        stop_audio()
         self.tracker.stop()
         self.app.quit()
 
@@ -158,9 +201,10 @@ def main():
     parser = argparse.ArgumentParser(description="Project Kontroll: Jarvis AR Gesture Mouse")
     parser.add_argument("--debug", "--calibrate", action="store_true", help="Launch directly into calibration view")
     parser.add_argument("--autostart", action="store_true", help="Indicates launch originated from Windows startup")
+    parser.add_argument("--boot", action="store_true", help="Launch directly into full-screen dynamic Jarvis boot sequence")
     args = parser.parse_args()
 
-    app = KontrollApp(show_debug=args.debug, is_autostart_launch=args.autostart)
+    app = KontrollApp(show_debug=args.debug, is_autostart_launch=args.autostart, is_boot_launch=args.boot)
     sys.exit(app.run())
 
 

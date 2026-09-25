@@ -1,7 +1,7 @@
 """
 Real-time Camera Calibration & Diagnostic Visualizer for Project Kontroll.
-Displays live tracking skeleton, ergonomic comfort bounds, angle-invariant tap metrics,
-detected camera tilt angle, and camera mounting selector.
+Displays live tracking skeleton, ergonomic comfort bounds, optical flow telemetry,
+desk homography tilt un-warping, ballistics air-clutching status, and orthogonal gestures.
 """
 
 from typing import Optional
@@ -23,8 +23,8 @@ class DebugWindow(QWidget):
         self.tracker = tracker
         self.gesture_engine = gesture_engine
 
-        self.setWindowTitle("Project Kontroll // Diagnostic & Calibration HUD")
-        self.resize(760, 680)
+        self.setWindowTitle("Project Kontroll . Diagnostic and Calibration HUD")
+        self.resize(780, 720)
         self.setStyleSheet("""
             QWidget {
                 background-color: #0b0f19;
@@ -76,12 +76,12 @@ class DebugWindow(QWidget):
         self.video_label.setStyleSheet("border: 2px solid #142845; border-radius: 8px; background-color: #04060a;")
         layout.addWidget(self.video_label)
 
-        # Controls Row: Camera Mount / Tilt Mode Selector
+        # Controls Row 1: Camera Mount and Tracking Mode Selectors
         ctrl_layout = QHBoxLayout()
         ctrl_layout.addWidget(QLabel("Webcam Mount:"))
         self.mount_combo = QComboBox()
         self.mount_combo.addItems([
-            "Auto-Compensate Angle (Recommended)",
+            "Auto Compensate Angle (Recommended)",
             "Left Monitor (Tilted ~35°)",
             "Center Monitor (0° Straight)",
             "Right Monitor (Tilted ~35°)"
@@ -92,6 +92,16 @@ class DebugWindow(QWidget):
         self.mount_combo.currentIndexChanged.connect(self._on_mount_changed)
         ctrl_layout.addWidget(self.mount_combo)
 
+        ctrl_layout.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems([
+            "Relative Ballistics with Air Clutching",
+            "Absolute Screen Mapping"
+        ])
+        self.mode_combo.setCurrentIndex(0 if self.gesture_engine.tracking_mode == "relative" else 1)
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        ctrl_layout.addWidget(self.mode_combo)
+
         self.tilt_label = QLabel("TILT: 0.0°")
         self.tilt_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
         ctrl_layout.addWidget(self.tilt_label)
@@ -100,20 +110,20 @@ class DebugWindow(QWidget):
 
         # Telemetry Row 1: Metrics
         telemetry_layout = QHBoxLayout()
-        self.fps_label = QLabel("CAMERA: -- FPS")
+        self.fps_label = QLabel("CAMERA: 0 FPS")
         self.status_label = QLabel("STATUS: ACTIVE")
         self.status_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
-        self.shaka_label = QLabel("SHAKA: OFF 🤙")
-        self.shaka_label.setStyleSheet("color: #718096;")
-        self.super_label = QLabel("DRAG POSE: OFF")
-        self.super_label.setStyleSheet("color: #718096;")
+        self.flow_label = QLabel("FLOW: STILL")
+        self.flow_label.setStyleSheet("color: #00ffaa; font-weight: bold;")
+        self.clutch_label = QLabel("CLUTCH: ENGAGED")
+        self.clutch_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
         self.lock_label = QLabel("TARGET: FREE")
         self.lock_label.setStyleSheet("color: #718096; font-weight: bold;")
 
         telemetry_layout.addWidget(self.fps_label)
         telemetry_layout.addWidget(self.status_label)
-        telemetry_layout.addWidget(self.shaka_label)
-        telemetry_layout.addWidget(self.super_label)
+        telemetry_layout.addWidget(self.flow_label)
+        telemetry_layout.addWidget(self.clutch_label)
         telemetry_layout.addWidget(self.lock_label)
         layout.addLayout(telemetry_layout)
 
@@ -140,6 +150,10 @@ class DebugWindow(QWidget):
         if 0 <= idx < len(modes):
             self.gesture_engine.mount_mode = modes[idx]
 
+    def _on_mode_changed(self, idx: int):
+        mode = "relative" if idx == 0 else "absolute"
+        self.gesture_engine.set_tracking_mode(mode)
+
     def _refresh_frame(self):
         if not self.isVisible():
             return
@@ -159,6 +173,25 @@ class DebugWindow(QWidget):
         else:
             self.tilt_label.setText(f"TILT: CENTER ({abs(tilt):.1f}°)")
 
+        # Update Optical Flow Telemetry
+        flow_dx, flow_dy = self.tracker.latest_optical_flow_delta
+        is_flow_still = (abs(flow_dx) < 1e-4 and abs(flow_dy) < 1e-4)
+        if is_flow_still:
+            self.flow_label.setText("FLOW: STILL (0.00, 0.00)")
+            self.flow_label.setStyleSheet("color: #00ffaa; font-weight: bold;")
+        else:
+            self.flow_label.setText(f"FLOW: ({flow_dx:+.2f}, {flow_dy:+.2f})")
+            self.flow_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
+
+        # Update Air Clutch
+        is_clutched = getattr(self.gesture_engine.ballistics, "is_clutched", False)
+        if is_clutched:
+            self.clutch_label.setText("CLUTCH: RESTING")
+            self.clutch_label.setStyleSheet("color: #ffaa00; font-weight: bold;")
+        else:
+            self.clutch_label.setText("CLUTCH: ENGAGED")
+            self.clutch_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
+
         # Update Target Lock
         if getattr(self.gesture_engine, "last_is_locked", False):
             desc = getattr(self.gesture_engine, "last_target_desc", "TARGET") or "TARGET"
@@ -173,10 +206,8 @@ class DebugWindow(QWidget):
             self.action_label.setText("NO HAND")
             self.action_label.setStyleSheet("color: #718096; font-style: italic; padding-left: 10px;")
             self.tap_bar.setValue(0)
-            self.shaka_label.setText("SHAKA: OFF")
-            self.shaka_label.setStyleSheet("color: #718096;")
-            self.super_label.setText("DRAG POSE: OFF")
-            self.super_label.setStyleSheet("color: #718096;")
+            self.clutch_label.setText("CLUTCH: NO HAND")
+            self.clutch_label.setStyleSheet("color: #718096;")
             self.lock_label.setText("TARGET: FREE")
             self.lock_label.setStyleSheet("color: #718096; font-weight: bold;")
         else:
@@ -186,31 +217,28 @@ class DebugWindow(QWidget):
             right_state = getattr(self.gesture_engine, "right_click_state", "UP")
 
             if is_shaka:
-                self.shaka_label.setText("SHAKA: ACTIVE 🤙")
-                self.shaka_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
                 self.action_label.setText("ACTION: SHAKA TOGGLE 🤙")
                 self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
+            elif is_dragging:
+                self.action_label.setText("ACTION: DRAGGING (👌)")
+                self.action_label.setStyleSheet("color: #ffaa00; font-weight: bold; padding-left: 10px;")
+            elif tap_state == "DOWN":
+                self.action_label.setText("ACTION: LEFT CLICK CONTACT ⚡")
+                self.action_label.setStyleSheet("color: #00ffaa; font-weight: bold; padding-left: 10px;")
+            elif right_state == "DOWN":
+                self.action_label.setText("ACTION: RIGHT CLICK CONTACT ⚡")
+                self.action_label.setStyleSheet("color: #00e0ff; font-weight: bold; padding-left: 10px;")
+            elif is_clutched:
+                self.action_label.setText("ACTION: CLUTCHED (HAND RESTING)")
+                self.action_label.setStyleSheet("color: #ffaa00; font-weight: bold; padding-left: 10px;")
             else:
-                self.shaka_label.setText("SHAKA: OFF")
-                self.shaka_label.setStyleSheet("color: #718096;")
-
-                if is_dragging:
-                    self.action_label.setText("ACTION: DRAGGING (👌)")
-                    self.action_label.setStyleSheet("color: #ffaa00; font-weight: bold; padding-left: 10px;")
-                elif tap_state == "DOWN":
-                    self.action_label.setText("ACTION: LEFT CLICK CONTACT ⚡")
-                    self.action_label.setStyleSheet("color: #00ffaa; font-weight: bold; padding-left: 10px;")
-                elif right_state == "DOWN":
-                    self.action_label.setText("ACTION: RIGHT CLICK CONTACT ⚡")
-                    self.action_label.setStyleSheet("color: #00e0ff; font-weight: bold; padding-left: 10px;")
-                else:
-                    self.action_label.setText("ACTION: MOVE")
-                    self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
+                self.action_label.setText("ACTION: MOVE")
+                self.action_label.setStyleSheet("color: #00f0ff; font-weight: bold; padding-left: 10px;")
 
         if frame is None:
             return
 
-        # Mirror video preview so it acts naturally like a selfie / looking glass
+        # Mirror video preview for natural selfie reflection
         display_frame = cv2.flip(frame, 1)
         h, w, _ = display_frame.shape
 
@@ -247,31 +275,29 @@ class DebugWindow(QWidget):
                 color = (0, 255, 255) if idx in (4, 8, 12, 20) else (100, 200, 255)
                 cv2.circle(display_frame, pt, 3 if idx not in (4, 8, 12, 20) else 6, color, -1)
 
-            # Thumb (4), Index (8), Middle (12) tracking lines
             p4 = points[4]
             p8 = points[8]
             p12 = points[12]
+
             # Cyan line between Thumb and Index (Left Click / Drag)
             cv2.line(display_frame, p4, p8, (255, 240, 0), 2)
-            # Green line between Index and Middle (Right Click)
-            cv2.line(display_frame, p8, p12, (0, 255, 0), 1)
+            # Magenta line between Thumb and Middle (Pillar 3: Right Click)
+            cv2.line(display_frame, p4, p12, (255, 0, 255), 2)
+
+            # Draw Optical Flow 48x48 ROI around index fingertip
+            roi_half = 24
+            rx1 = max(0, p8[0] - roi_half)
+            ry1 = max(0, p8[1] - roi_half)
+            rx2 = min(w, p8[0] + roi_half)
+            ry2 = min(h, p8[1] + roi_half)
+            cv2.rectangle(display_frame, (rx1, ry1), (rx2, ry2), (0, 255, 180), 1)
 
             # Compute Metric
             scale = self.gesture_engine._get_hand_scale(landmarks)
             tap_ratio, _ = self.gesture_engine.compute_tap_metric(landmarks, scale)
 
-            # Update tap progress bar (reaches 100% on contact)
             pct = max(0, min(100, int(((0.45 - tap_ratio) / (0.45 - 0.25)) * 100)))
             self.tap_bar.setValue(pct)
-
-            # Drag pose status
-            is_super = self.gesture_engine.is_super_gesture(landmarks)
-            if is_super:
-                self.super_label.setText("DRAG POSE: ACTIVE 👌")
-                self.super_label.setStyleSheet("color: #00f0ff; font-weight: bold;")
-            else:
-                self.super_label.setText("DRAG POSE: OFF")
-                self.super_label.setStyleSheet("color: #718096;")
 
         # Convert to QPixmap
         display_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
