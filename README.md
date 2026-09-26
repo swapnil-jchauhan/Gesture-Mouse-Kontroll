@@ -23,11 +23,11 @@
 
 ## 1. What is this?
 
-Imagine being able to control ur PC without touching anything like Tony Stark interacting with holograms in mid air. 
+Alr so think about being able to control ur PC without touching anything like Tony Stark interacting with holograms in mid air. 
 
 Every webcam mouse project I found online had the same annoying issues:
-1. The cursor shakes like crazy because cheap webcams have noisy sensors.
-2. You miss your clicks because your hand twitches when tapping mid air and the cursor slides away from the button.
+1. The cursor shakes like crazy because cheap webcams have noisy sensors. ( Mine does too rn, hold up its under progress )
+2. You miss your clicks because your hand twitches when tapping mid air and the cursor slides away from the button. ( Same issue with mine rn, bare with us )
 3. They lag or need expensive depth cameras.
 
 So I made this
@@ -38,7 +38,7 @@ It is a lightweight software for Windows 11 that:
 * Has literal OS level sticky aim assist. When your cursor gets close to ANY clickable button, link, tab, Chrome UI, or taskbar icon, it clings hard directly onto it so your clicks never slip off.
 * Can be turned on or off anytime with a quick Shaka sign 🤙 (defaults to Standby on launch so it never moves your cursor unexpectedly).
 * When you enter your password and log in, it detects your unlocked desktop and plays an epic Jarvis boot animation with British RyanNeural voice, running silently in the background with no black cmd console window.
-* Removes all jitter so the mouse moves butter smooth.
+* Removes all jitter so the mouse moves butter smooth. ( tries... ) 
 
 ---
 
